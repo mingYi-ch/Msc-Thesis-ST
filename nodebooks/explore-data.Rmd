@@ -1,0 +1,137 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Import Library {#sec-library}
+
+```{r}
+library(Seurat)
+library(patchwork)
+library(tidyverse)
+```
+
+# Data summary
+
+```{r}
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
+fn <- list.files(data_dir)  # 5  biopsies
+
+biopsy_dirs <- character(0)
+biopsy_names <- character(0)
+biopsy_objs <- c()
+
+for (name in fn) {
+  path <- paste(data_dir, name, sep = '/')
+  biopsy_dirs <- c(biopsy_dirs, path)
+  
+  file_path <-  paste(path, "filtered_feature_bc_matrix.h5", sep = '/')
+  if (!file.exists(file_path)) {
+    path <-  paste(path, "outs", sep = '/')
+  }
+    
+  # list.files(path)
+  # image_dir <- paste(path, '/spatial/tissue_lowres_image.png', sep = '')
+  obj <- Load10X_Spatial(
+    path,
+    filename = "filtered_feature_bc_matrix.h5",
+    assay = "Spatial",
+    slice = "slice1",
+    filter.matrix = TRUE,
+    to.upper = FALSE,
+    image = NULL
+  )
+  biopsy_objs <- c(biopsy_objs, obj)
+  biopsy_names <- c(biopsy_names, name)
+  
+}
+names(biopsy_objs) <-  biopsy_names
+names(biopsy_dirs) <-  biopsy_names
+
+# Filt out spots with 0 UMIs
+obj <- biopsy_objs$C1_OA488_Hand 
+biopsy_objs$C1_OA488_Hand <- subset(obj, nCount_Spatial > 0)
+
+biopsy_names
+print(object.size(biopsy_objs), units = 'Mb')
+
+```
+
+```{r}
+dims <- lapply(biopsy_objs, dim)
+names(dims) <- names(biopsy_objs)
+print(dims)
+```
+
+```{r}
+plots <- lapply(biopsy_objs, VlnPlot, features = "nCount_Spatial", pt.size = 0.01)
+plots <- lapply(plots, function(x) x + NoLegend())
+
+labs <- lapply(names(biopsy_objs), function(x) labs(x = 'Spots', y= 'Counts', title = x))
+plots <- mapply(function(x, y) x + y, plots, labs)
+plots
+
+```
+
+# Preprocess
+
+```{r}
+# obj <- biopsy_objs$C2_PO552
+# obj <- biopsy_objs$B2_KSB14
+# obj <- biopsy_objs$D2_PsATrans3
+
+biopsy_objs <- lapply(biopsy_objs, SCTransform, assay = "Spatial", verbose = FALSE)
+
+```
+
+```{r}
+obj <- biopsy_objs$SHK166_RA_Knee
+obj
+```
+
+# Variable genes
+
+```{r}
+obj <- biopsy_objs$C1_OA488_Hand 
+obj <- biopsy_objs$D2_PsATrans3
+
+obj <- SCTransform(obj, assay = "Spatial", verbose = FALSE)
+obj <- FindSpatiallyVariableFeatures(obj, assay = "SCT", features = VariableFeatures(obj)[1:1000],
+    selection.method = "moransi")
+# top.features <- head(SpatiallyVariableFeatures(obj, selection.method = "moransi"), 6)
+
+```
+
+```{r}
+p1 <- SpatialFeaturePlot(obj, features = VariableFeatures(obj)[1], alpha = c(0.1, 1))
+p2 <- SpatialFeaturePlot(obj, features = VariableFeatures(obj)[2], alpha = c(0.1, 1))
+wrap_plots(p1, p2)
+```
+
+# Dimension reduction and clustering
+
+```{r}
+
+# Make Dimension and clustering Plots
+ShowCluster <- function(obj) {
+  obj <- RunPCA(obj, assay = "SCT", verbose = FALSE)
+  obj <- FindNeighbors(obj, reduction = "pca", dims = 1:50)
+  obj <- FindClusters(obj, verbose = FALSE)
+  obj <- RunUMAP(obj, reduction = "pca", dims = 1:50)
+  
+  p1 <- DimPlot(obj, reduction = "umap", label = TRUE)
+  p2 <- SpatialDimPlot(obj, label = TRUE, label.size = 3)
+  p1.2 <- p1 + p2
+  return(p1.2)
+}
+
+```
+
+```{r}
+cluster_plots <- lapply(biopsy_objs, ShowCluster)
+labs <- lapply(names(biopsy_objs), function(x)  plot_annotation(title = x))
+cluster_plots <- mapply(function(x, y) x + y, cluster_plots, labs)
+cluster_plots
+```

@@ -1,0 +1,260 @@
+---
+title: "Deconvolution"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(SpatialExperiment)
+library(Matrix)
+library(STdeconvolve)
+library(ggplot2)
+library(gghighlight)
+
+```
+
+# Load data
+
+```{r}
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
+fn <- list.files(data_dir)  # 5  biopsies
+
+biopsy_dirs <- character(0)
+biopsy_names <- character(0)
+
+for (name in fn) {
+  path <- paste(data_dir, name, sep = '/')
+  biopsy_dirs <- c(biopsy_dirs, path)
+  
+  file_path <-  paste(path, "filtered_feature_bc_matrix.h5", sep = '/')
+  if (!file.exists(file_path)) {
+    path <-  paste(path, "outs", sep = '/')
+  }
+    
+  biopsy_names <- c(biopsy_names, name)
+  
+}
+names(biopsy_dirs) <-  biopsy_names
+
+biopsy_names
+biopsy_dirs
+# print(object.size(biopsy_objs), units = 'Mb')
+
+```
+
+```{r}
+## directory structure does not match
+# dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+# obj_path <- paste(dir, 'filtered_feature_bc_matrix', sep = '/')
+# obj_path
+# se <- SpatialExperiment::read10xVisium(samples = dir,
+#      type = "sparse",
+#      data = "filtered")
+```
+
+```{r}
+dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+
+path.pos <- paste(dir, 'spatial/tissue_positions.csv', sep = '/')
+pos.info <- read.csv(path.pos)
+head(pos.info)
+# Filting
+pos.info <- subset(pos.info, in_tissue == 1)
+pos <- pos.info[, c('pxl_row_in_fullres', 'pxl_col_in_fullres')]
+dim(pos)
+rownames(pos) <- pos.info$barcode
+plot(pos)
+
+path.gexp <- paste(dir, 'filtered_feature_bc_matrix/matrix.mtx.gz', sep = '/')
+
+gexp <- Matrix::readMM(path.gexp)
+dim(gexp)
+gexp[1:5,1:5]
+
+path.bc <- paste(dir, 'filtered_feature_bc_matrix/barcodes.tsv.gz', sep = '/')
+barcodes <- read.csv(path.bc, sep="\t", header=FALSE)
+head(barcodes)
+dim(barcodes)
+colnames(gexp) <- barcodes$V1
+
+names(barcodes)
+
+path.feature <- paste(dir, 'filtered_feature_bc_matrix/features.tsv.gz', sep = '/')
+features <- read.csv(path.feature, sep="\t", header=FALSE)
+dim(features)
+rownames(gexp) <- features$V2
+```
+
+```{r}
+pos <- as.matrix(pos)
+# "pxl_col_in_fullres" = "y" coordinates, and "pxl_row_in_fullres" = "x" coordinates
+colnames(pos) <- c("x", "y")
+
+se <- SpatialExperiment(
+    assay = gexp, 
+    spatialCoords = pos)
+
+assayNames(se) <- 'counts'
+
+
+se
+```
+
+# Deconvolve
+
+## Quality control
+
+```{r}
+cd <- assay(se, "counts")
+
+# Filter out poor pixels and genes
+counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 10, verbose = TRUE)
+dim(counts)
+dim(pos)
+
+# Log transform
+
+```
+
+## STDeconvolve
+
+```{r}
+# Select features
+corpus <- restrictCorpus(counts, 
+                         removeAbove=0.95, 
+                         removeBelow = 0.05, 
+                         nTopOD = NA,
+                         plot = FALSE,
+                         alpha = 1e-8)
+
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = c(10, 17, 20))
+
+```
+
+```{r}
+opt.K <- 10
+# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
+optLDA <- optimalModel(models = ldas, opt = opt.K)
+results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
+deconProp <- results$theta
+deconGexp <- results$beta
+```
+
+```{r}
+## visualize deconvolved cell-type proportions
+vizAllTopics(deconProp, pos[rownames(deconProp),], r=55, lwd=0)	  
+
+## interpret these cell-types based on their gene expression
+topGenes(deconGexp)
+## top genes based on log 2 (fold change) for each cell-type
+lapply(1:opt.K, function(i) {
+  head(sort(log2(deconGexp[i,]/colMeans(deconGexp[-i,])), decreasing=TRUE))
+})
+```
+
+```{r}
+## plot 
+topic <- "9"
+vizTopic(theta = deconProp, pos = pos, topic = topic, plotTitle = paste('Topic -', topic),
+         size = 1, stroke = 0, alpha = 0.8,
+         low = "white",
+         high = "red")
+
+```
+
+```{r}
+lapply(1:opt.K, function(i) {
+vizTopic(theta = deconProp, pos = pos, topic = i, plotTitle = i,
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+})
+```
+
+## Annotation strategy
+
+# Define covariate
+
+## Proximity to a specific cell type
+
+```{r}
+# Define target cell types
+topic.target <- "9"
+prop.threshold <- 0.2
+weight <- NULL
+
+
+dim(deconProp)
+dim(deconGexp)
+
+heatmap(deconGexp)
+colnames(deconProp)
+deconProp_target <- deconProp[deconProp[,topic.target] > prop.threshold,]
+
+dim(deconProp_target)
+bc_target <- rownames(deconProp_target)
+pos <- spatialCoords(se)
+pos.target <-  pos[bc_target,]
+
+# Calculate min dist: use graph later, not connected
+pos.target[,"y"] <- -1 * pos.target[,"y"]
+dists <-abs(pos %*% t(pos.target))
+dists.min <- rowMins(dists)
+names(dists.min) <- rownames(dists)
+
+se$dists.min <- dists.min
+se
+```
+
+```{r}
+# some spots are filled out by quality control
+pos <- pos[rownames(deconProp),]
+pos <- data.frame(pos)
+pos$bc <- rownames(pos)
+
+ggplot(pos, aes(x = x, y = y)) +
+  geom_point(size = 1, color = "grey") +
+  gghighlight(bc %in% rownames(pos.target)) +
+  geom_point(col = "blue", size = 1) +
+  labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
+
+as_tibble(pos) %>%
+  mutate(prop = deconProp[, topic.target]) %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_point(aes(color = prop), size = 1, stroke = 0) +
+    scale_color_gradient2()
+```
+
+# LEMUR
+
+```{r}
+library(lemur)
+library(tidyverse)
+```
+
+```{r}
+
+```
+
+# Misc
+
+```{r}
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
+deconvolution_topic_features_k10 <- read.csv(path)
+head(deconvolution_topic_features_k10)
+colnames(deconvolution_topic_features_k10)
+
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
+deconvolved_spots_k10 <- read.csv(path)
+head(deconvolved_spots_k10)
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>

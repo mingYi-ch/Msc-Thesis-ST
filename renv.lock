@@ -1,0 +1,18 @@
+{
+  "R": {
+    "Version": "4.3.3",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://stat.ethz.ch/CRAN"
+      }
+    ]
+  },
+  "Packages": {
+    "renv": {
+      "Package": "renv",
+      "Version": "1.0.5",
+      "Source": "Repository"
+    }
+  }
+}

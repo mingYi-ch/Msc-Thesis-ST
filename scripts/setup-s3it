@@ -1,0 +1,11 @@
+#!/bin/bash
+
+module load mamba
+mamba create -n .renv-s3it -c conda-forge r-base -y
+mamba create -n .renv-s3it -c conda-forge "r-base==4.3.3" -y
+srun --pty -n 1 -c 2 --time=01:00:00 --mem=16G bash -l
+
+# compute node
+module load mamba
+mamba activate .renv-s3it
+R
