@@ -3,3 +3,6 @@
 .RData
 .Ruserdata
 renv
+
+*.png
+*.pdf

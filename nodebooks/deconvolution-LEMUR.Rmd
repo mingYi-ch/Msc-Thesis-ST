@@ -14,10 +14,20 @@ library(Matrix)
 library(STdeconvolve)
 library(ggplot2)
 library(gghighlight)
+library(rlang)
+
+library(lemur)
+library(tidyverse)
+
+library(igraph)
 
 ```
 
 # Load data
+
+```{r}
+set.seed(5)
+```
 
 ```{r}
 data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
@@ -129,9 +139,9 @@ corpus <- restrictCorpus(counts,
                          removeBelow = 0.05, 
                          nTopOD = NA,
                          plot = FALSE,
-                         alpha = 1e-8)
+                         alpha = 0.05) # 1e-8
 
-ldas <- fitLDA(t(as.matrix(corpus)), Ks = c(10, 17, 20))
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = 8:20)
 
 ```
 
@@ -157,16 +167,6 @@ lapply(1:opt.K, function(i) {
 ```
 
 ```{r}
-## plot 
-topic <- "9"
-vizTopic(theta = deconProp, pos = pos, topic = topic, plotTitle = paste('Topic -', topic),
-         size = 1, stroke = 0, alpha = 0.8,
-         low = "white",
-         high = "red")
-
-```
-
-```{r}
 lapply(1:opt.K, function(i) {
 vizTopic(theta = deconProp, pos = pos, topic = i, plotTitle = i,
          size = 1, stroke = 0, alpha = 0.5,
@@ -182,10 +182,73 @@ vizTopic(theta = deconProp, pos = pos, topic = i, plotTitle = i,
 ## Proximity to a specific cell type
 
 ```{r}
+# each point has at most 8 neighbours, return row idxs of neighbours including itself
+get.adjacency.matrix <- function(coords) {
+  dim.bc <- dim(coords)[1]
+  adjacency.matrix <-  matrix(0, nrow = dim.bc, ncol = dim.bc)
+  
+  for (idx.1 in 1:dim.bc) {
+    for (idx.2 in seq2(idx.1 + 1, dim.bc)) {
+      
+    }
+      x1 <- coords[idx.1, ][1]
+      y1 <- coords[idx.1, ][2]
+      
+      x2 <- coords[idx.2, ][1]
+      y2 <- coords[idx.2, ][2]
+      
+      nei.diff <- c(-1, 0, 1)
+      is.nei <- (x1 - x2 %in% nei.diff) && (y1 - y2 %in% nei.diff)
+      if (is.nei) {
+          adjacency.matrix[idx.1, idx.2] <- 1
+          adjacency.matrix[idx.2, idx.1] <- 1
+      }
+  }
+  return(adjacency.matrix)
+}
+
+pos <- spatialCoords(se)
+adjacency.matrix <- get.adjacency.matrix(pos)
+sum(adjacency.matrix)
+
+```
+
+```{r}
+# build a graph
+g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+bc.idxs <- seq.int(nrow(pos))
+
+target.idxs <- which(rownames(pos) %in% rownames(pos.target))
+target.idxs
+
+# find shortest dist
+spl <- c()
+
+for (i in bc.idxs) {
+  spl.i <- numeric()
+  
+  for (j in target.idxs) {
+    shortest_path <- shortest_paths(g, from = i, to = j, output = "vpath")
+    vpath <- shortest_path$vpath 
+    
+    if (is.null(vpath)) {
+      cnt.v <- Inf
+    }else{
+      cnt.v <- length(vpath[[1]]) - 1
+    }
+    spl.i <- c(spl.i, cnt.v)
+  }
+  spl <- rbind(spl, spl.i)
+}
+```
+
+```{r}
 # Define target cell types
 topic.target <- "9"
-prop.threshold <- 0.2
+prop.threshold <- 0.2 # 
 weight <- NULL
+
+pos <- spatialCoords(se)
 
 
 dim(deconProp)
@@ -197,7 +260,6 @@ deconProp_target <- deconProp[deconProp[,topic.target] > prop.threshold,]
 
 dim(deconProp_target)
 bc_target <- rownames(deconProp_target)
-pos <- spatialCoords(se)
 pos.target <-  pos[bc_target,]
 
 # Calculate min dist: use graph later, not connected
@@ -213,14 +275,14 @@ se
 ```{r}
 # some spots are filled out by quality control
 pos <- pos[rownames(deconProp),]
-pos <- data.frame(pos)
-pos$bc <- rownames(pos)
 
-ggplot(pos, aes(x = x, y = y)) +
-  geom_point(size = 1, color = "grey") +
-  gghighlight(bc %in% rownames(pos.target)) +
-  geom_point(col = "blue", size = 1) +
-  labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
+as_tibble(pos) %>%
+  mutate(bc = rownames(pos)) %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_point(size = 1, color = "grey") +
+    gghighlight(bc %in% rownames(pos.target)) +
+    geom_point(col = "blue", size = 1) +
+    labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
 
 as_tibble(pos) %>%
   mutate(prop = deconProp[, topic.target]) %>%
@@ -232,15 +294,70 @@ as_tibble(pos) %>%
 # LEMUR
 
 ```{r}
-library(lemur)
-library(tidyverse)
-```
-
-```{r}
+fit <- lemur(se, design = ~ min.dist, n_embedding = 30, test_fraction = 0.5)
+fit
+# fit <- test_de(fit, contrast = cond())
 
 ```
 
 # Misc
+
+```{r}
+x <- 1:2
+y <- 3:7
+
+combinations <- expand.grid(x,y)
+as.list(combinations)
+
+nei.diff <- c(-1, 0, 1)
+9 - 8 %in% nei.diff
+for (i in 9:8){
+  print(i)
+}
+
+a <- 5
+b <- 1
+
+for (i in a:b) {
+  print(i)
+}
+# Output: (No output because a > b)
+seq_len(9,8)
+seq_len()
+NA - 1
+min(NA, 1)
+
+
+```
+
+```{r}
+# Create a simple unweighted graph
+# Example edge list
+edges <- data.frame(from = c(0, 1, 1, 2), to = c(1, 2, 3, 3))
+
+# Create a graph from the edge list
+graph <- graph.data.frame(edges, directed = FALSE)  # Adjust 'directed' as needed
+
+
+# Specify source and target vertices
+source <- 1
+target <- 3
+
+# Find the shortest path
+shortest_paths <- shortest_paths(graph, from = source, to = target)
+shortest_paths$vpath
+# Check if a path exists
+if (length(shortest_paths) > 0) {
+    # Access the first shortest path (modify as needed)
+    shortest_path <- shortest_paths[[1]]
+
+    cat("Shortest path:", shortest_path)
+} else {
+    cat("No path exists between", source, "and", target)
+}
+
+
+```
 
 ```{r}
 path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
@@ -251,6 +368,18 @@ colnames(deconvolution_topic_features_k10)
 path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
 deconvolved_spots_k10 <- read.csv(path)
 head(deconvolved_spots_k10)
+```
+
+```{r}
+# Create a matrix (you can replace this with your own data)
+my_matrix <- matrix(c(1, 2, 3, 4, 5, 6, 3, 3, -Inf), ncol = 3)
+
+# Calculate row minimums, ignoring NA values
+row_mins <- rowMins(my_matrix, na.rm = TRUE)
+
+# Print the result
+print(row_mins)
+
 ```
 
 # Reference
