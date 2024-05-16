@@ -6,3 +6,7 @@ renv
 
 *.png
 *.pdf
+data/.
+results/.
+
+*/renv
