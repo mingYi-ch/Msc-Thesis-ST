@@ -9,18 +9,22 @@ output.width: "75%"
 # Library
 
 ```{r}
-library(SpatialExperiment)
 library(Matrix)
-library(STdeconvolve)
 library(ggplot2)
 library(gghighlight)
-library(rlang)
-
-library(lemur)
 library(tidyverse)
 
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
 library(igraph)
+library(qs)
+library(plotrix)
 
+```
+
+```{r}
+source("../src/util.R")
 ```
 
 # Load data
@@ -30,91 +34,20 @@ set.seed(5)
 ```
 
 ```{r}
+# path for S3IT
 data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
-fn <- list.files(data_dir)  # 5  biopsies
+# path for local
+data_dir <- '../data'
 
-biopsy_dirs <- character(0)
-biopsy_names <- character(0)
-
-for (name in fn) {
-  path <- paste(data_dir, name, sep = '/')
-  biopsy_dirs <- c(biopsy_dirs, path)
-  
-  file_path <-  paste(path, "filtered_feature_bc_matrix.h5", sep = '/')
-  if (!file.exists(file_path)) {
-    path <-  paste(path, "outs", sep = '/')
-  }
-    
-  biopsy_names <- c(biopsy_names, name)
-  
-}
-names(biopsy_dirs) <-  biopsy_names
-
-biopsy_names
-biopsy_dirs
-# print(object.size(biopsy_objs), units = 'Mb')
-
-```
-
-```{r}
-## directory structure does not match
-# dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
-# obj_path <- paste(dir, 'filtered_feature_bc_matrix', sep = '/')
-# obj_path
-# se <- SpatialExperiment::read10xVisium(samples = dir,
-#      type = "sparse",
-#      data = "filtered")
+biopsy_dirs <- get.dirs(data_dir)
 ```
 
 ```{r}
 dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
-
-path.pos <- paste(dir, 'spatial/tissue_positions.csv', sep = '/')
-pos.info <- read.csv(path.pos)
-head(pos.info)
-# Filting
-pos.info <- subset(pos.info, in_tissue == 1)
-pos <- pos.info[, c('pxl_row_in_fullres', 'pxl_col_in_fullres')]
-dim(pos)
-rownames(pos) <- pos.info$barcode
-plot(pos)
-
-path.gexp <- paste(dir, 'filtered_feature_bc_matrix/matrix.mtx.gz', sep = '/')
-
-gexp <- Matrix::readMM(path.gexp)
-dim(gexp)
-gexp[1:5,1:5]
-
-path.bc <- paste(dir, 'filtered_feature_bc_matrix/barcodes.tsv.gz', sep = '/')
-barcodes <- read.csv(path.bc, sep="\t", header=FALSE)
-head(barcodes)
-dim(barcodes)
-colnames(gexp) <- barcodes$V1
-
-names(barcodes)
-
-path.feature <- paste(dir, 'filtered_feature_bc_matrix/features.tsv.gz', sep = '/')
-features <- read.csv(path.feature, sep="\t", header=FALSE)
-dim(features)
-rownames(gexp) <- features$V2
+se <- load.data(dir)
 ```
 
-```{r}
-pos <- as.matrix(pos)
-# "pxl_col_in_fullres" = "y" coordinates, and "pxl_row_in_fullres" = "x" coordinates
-colnames(pos) <- c("x", "y")
-
-se <- SpatialExperiment(
-    assay = gexp, 
-    spatialCoords = pos)
-
-assayNames(se) <- 'counts'
-
-
-se
-```
-
-# Deconvolve
+# Deconvolution
 
 ## Quality control
 
@@ -141,7 +74,7 @@ corpus <- restrictCorpus(counts,
                          plot = FALSE,
                          alpha = 0.05) # 1e-8
 
-ldas <- fitLDA(t(as.matrix(corpus)), Ks = 8:20)
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = 10)
 
 ```
 
@@ -182,70 +115,9 @@ vizTopic(theta = deconProp, pos = pos, topic = i, plotTitle = i,
 ## Proximity to a specific cell type
 
 ```{r}
-# each point has at most 8 neighbours, return row idxs of neighbours including itself
-get.adjacency.matrix <- function(coords) {
-  dim.bc <- dim(coords)[1]
-  adjacency.matrix <-  matrix(0, nrow = dim.bc, ncol = dim.bc)
-  
-  for (idx.1 in 1:dim.bc) {
-    for (idx.2 in seq2(idx.1 + 1, dim.bc)) {
-      
-    }
-      x1 <- coords[idx.1, ][1]
-      y1 <- coords[idx.1, ][2]
-      
-      x2 <- coords[idx.2, ][1]
-      y2 <- coords[idx.2, ][2]
-      
-      nei.diff <- c(-1, 0, 1)
-      is.nei <- (x1 - x2 %in% nei.diff) && (y1 - y2 %in% nei.diff)
-      if (is.nei) {
-          adjacency.matrix[idx.1, idx.2] <- 1
-          adjacency.matrix[idx.2, idx.1] <- 1
-      }
-  }
-  return(adjacency.matrix)
-}
-
-pos <- spatialCoords(se)
-adjacency.matrix <- get.adjacency.matrix(pos)
-sum(adjacency.matrix)
-
-```
-
-```{r}
-# build a graph
-g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
-bc.idxs <- seq.int(nrow(pos))
-
-target.idxs <- which(rownames(pos) %in% rownames(pos.target))
-target.idxs
-
-# find shortest dist
-spl <- c()
-
-for (i in bc.idxs) {
-  spl.i <- numeric()
-  
-  for (j in target.idxs) {
-    shortest_path <- shortest_paths(g, from = i, to = j, output = "vpath")
-    vpath <- shortest_path$vpath 
-    
-    if (is.null(vpath)) {
-      cnt.v <- Inf
-    }else{
-      cnt.v <- length(vpath[[1]]) - 1
-    }
-    spl.i <- c(spl.i, cnt.v)
-  }
-  spl <- rbind(spl, spl.i)
-}
-```
-
-```{r}
 # Define target cell types
 topic.target <- "9"
-prop.threshold <- 0.2 # 
+prop.threshold <- 0.5  
 weight <- NULL
 
 pos <- spatialCoords(se)
@@ -255,21 +127,45 @@ dim(deconProp)
 dim(deconGexp)
 
 heatmap(deconGexp)
-colnames(deconProp)
-deconProp_target <- deconProp[deconProp[,topic.target] > prop.threshold,]
+deconProp_target <- deconProp[,topic.target]
+deconProp_target <- deconProp_target[deconProp_target > prop.threshold]
 
-dim(deconProp_target)
-bc_target <- rownames(deconProp_target)
-pos.target <-  pos[bc_target,]
+length(deconProp_target)
+bc.target <- names(deconProp_target)
+pos.target <-  pos[bc.target,]
+```
 
+```{r}
+
+pos <- spatialCoords(se)
+adjacency.matrix <- get.adjacency.matrix(pos)
+
+```
+
+```{r}
+# build a graph
+g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+length(components(g)$membership)
+
+bc.idxs <- seq.int(nrow(pos))
+
+target.idxs <- which(rownames(pos) %in% rownames(pos.target))
+min.dists.mat <- get.min.dists.mat(g, bc.idxs, target.idxs)
+```
+
+```{r}
+length(deconProp_target)
+dim(min.dists.mat)
+min.dists.mat
 # Calculate min dist: use graph later, not connected
-pos.target[,"y"] <- -1 * pos.target[,"y"]
-dists <-abs(pos %*% t(pos.target))
-dists.min <- rowMins(dists)
-names(dists.min) <- rownames(dists)
+spl.norm <- (min.dists.mat - min(min.dists.mat)) / (max(min.dists.mat) - min(min.dists.mat))
+spl.norm.prop <- sweep(spl.norm, 2, deconProp_target, FUN="/") # divide each row by target vector
+dists.min <- rowMins(spl.norm.prop)
+names(dists.min) <- rownames(pos)
 
-se$dists.min <- dists.min
+se$dists.min <- min.dists.mat
 se
+dists.min
 ```
 
 ```{r}
@@ -303,30 +199,18 @@ fit
 # Misc
 
 ```{r}
-x <- 1:2
-y <- 3:7
+library(igraph)
 
-combinations <- expand.grid(x,y)
-as.list(combinations)
+# Create a sample graph (you can replace this with your own graph)
+g <- graph.ring(10)
+g <- add_vertices(g, 3, color = "red")
+plot(g)
 
-nei.diff <- c(-1, 0, 1)
-9 - 8 %in% nei.diff
-for (i in 9:8){
-  print(i)
-}
+# Check if vertices 1 and 2 are connected
+are.connected(g, 1, 12)  # TRUE
 
-a <- 5
-b <- 1
-
-for (i in a:b) {
-  print(i)
-}
-# Output: (No output because a > b)
-seq_len(9,8)
-seq_len()
-NA - 1
-min(NA, 1)
-
+cl <- components(g)
+class(cl)
 
 ```
 
