@@ -1,0 +1,57 @@
+---
+title: "Test"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+
+```
+
+```{r}
+source("../src/util.R")
+```
+
+```{r}
+# Define the coordinates as a matrix
+coordinates <- matrix(c(
+  0, 0, 1, 0, 2, 0,
+  0, 1, 1, 1, 2, 1,
+  0, 2, 1, 2, 2, 2,
+  0, 3, 1, 3, 2, 3
+), ncol = 2, byrow = TRUE)
+
+```
+
+```{r}
+adjacency.matrix <- get.adjacency.matrix(coordinates, nei.diff = c(-1, 0, 1))
+sum(adjacency.matrix)
+
+# build a graph
+g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+components(g)
+
+g <- add_vertices(g, 3)
+plot(g)
+```
+
+```{r}
+to <- c(2, 4, 10)
+from <- 1:15
+from
+to
+min.dists.mat <- get.min.dists.mat(g, from, to)
+```

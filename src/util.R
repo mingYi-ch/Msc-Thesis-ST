@@ -65,22 +65,17 @@ get.dirs <- function(parent.dir) {
 
 # TODO: write test 
 # each point has at most 8 neighbours, return row idxs of neighbours including itself
-get.adjacency.matrix <- function(coords) {
+get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshold = 9000 ) {
   dim.bc <- dim(coords)[1]
   adjacency.matrix <-  matrix(0, nrow = dim.bc, ncol = dim.bc)
   
   for (idx.1 in 1:dim.bc) {
     for (idx.2 in idx.1 + seq_len(dim.bc - idx.1)) {
       
-      x1 <- coords[idx.1, ][1]
-      y1 <- coords[idx.1, ][2]
+      pt1 <- coords[idx.1, ]
+      pt2 <- coords[idx.2, ]
       
-      x2 <- coords[idx.2, ][1]
-      y2 <- coords[idx.2, ][2]
-      
-      # nei.diff <- c(-1, 0, 1)
-      nei.diff <- seq(-3, 3)
-      is.nei <- ((x1 - x2) %in% nei.diff) && ((y1 - y2) %in% nei.diff)
+      is.nei <- (pt1 - pt2)^2 < dist.sqr.threshold      
       if (is.nei) {
         adjacency.matrix[idx.1, idx.2] <- 1
         adjacency.matrix[idx.2, idx.1] <- 1
@@ -95,33 +90,36 @@ get.min.dists.mat <- function(g, from, to) {
   # get components
   membership <- components(g)$membership
   # find shortest dist, DP 
-  min.dists.mat <- matrix(data = NA, nrow = length(from), ncol = length(to))
+  len.from <- length(from)
+  len.to <- length(to)
   
-  for (i in from) {
-    for (j in seq_len(length(to))) {
-      target.idx <- to[j]
-      target.idx
+  from.map <- as.list(seq_len(len.from))
+  names(from.map) <- from
+  
+  min.dists.mat <- matrix(data = NA, nrow = len.from, ncol = len.to)
+  
+  for (i in seq_len(len.from)) {
+    for (j in seq_len(len.to)) {
+      from.idx <- from[i]
+      to.idx <- to[j]
       if (!is.na(min.dists.mat[i, j])) {
         next
-      }else if(membership[i] != membership[target.idx]){
+      }else if(membership[from.idx] != membership[to.idx]){
         # no path between them
         cnt.v <- Inf
-      }else if(i == target.idx) {
+      }else if(from.idx == to.idx) {
         cnt.v <- 0
       }else{
-        shortest_path <- shortest_paths(g, from = i, to = target.idx, output = "vpath")
+        shortest_path <- shortest_paths(g, from = from.idx, to = to.idx, output = "vpath")
         vpath <- shortest_path$vpath 
         vpath <- vpath[[1]]
         len.path <- length(vpath)
-        if (len.path == 0) {
-          cnt.v <- Inf
-        }else{
-          # if a vertex is on the shortest path, we can calculate the shortest distance to the target vertex
-          for (k in seq_len(len.path)) {
-            idx <- vpath[k]
-            min.dists.mat[idx, target.idx] <- len - k
-          }
-        }
+        # if a vertex is on the shortest path, we can calculate the shortest distance to the target vertex
+        for (k in seq_len(len.path)) {
+          idx <- vpath[k]
+          cat(idx, to.idx)
+          min.dists.mat[from.map$idx, as.character(j)] <- len.path - k
+      }
       }
     }
     # break

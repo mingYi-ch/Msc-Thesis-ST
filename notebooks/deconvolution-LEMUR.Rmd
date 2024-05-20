@@ -13,13 +13,14 @@ library(Matrix)
 library(ggplot2)
 library(gghighlight)
 library(tidyverse)
+library(dplyr)
+
 
 library(STdeconvolve)
 library(SpatialExperiment)
 library(lemur)
 library(igraph)
 library(qs)
-library(plotrix)
 
 ```
 
@@ -34,10 +35,10 @@ set.seed(5)
 ```
 
 ```{r}
-# path for S3IT
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
 # path for local
 data_dir <- '../data'
+# path for S3IT
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
 
 biopsy_dirs <- get.dirs(data_dir)
 ```
@@ -49,39 +50,19 @@ se <- load.data(dir)
 
 # Deconvolution
 
-## Quality control
-
-```{r}
-cd <- assay(se, "counts")
-
-# Filter out poor pixels and genes
-counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 10, verbose = TRUE)
-dim(counts)
-dim(pos)
-
-# Log transform
-
-```
-
 ## STDeconvolve
 
 ```{r}
-# Select features
-corpus <- restrictCorpus(counts, 
-                         removeAbove=0.95, 
-                         removeBelow = 0.05, 
-                         nTopOD = NA,
-                         plot = FALSE,
-                         alpha = 0.05) # 1e-8
-
-ldas <- fitLDA(t(as.matrix(corpus)), Ks = 10)
-
-```
-
-```{r}
-opt.K <- 10
+prior.k <- 19
 # select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
-optLDA <- optimalModel(models = ldas, opt = opt.K)
+res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
+if (!file.exists(res.path)) {
+  source("../scripts/deconvolution/STDeconvolve.R")
+}
+ldas <- qs::qread(res.path)
+
+# ldas$kneedOptK
+optLDA <- optimalModel(models = ldas, opt = prior.k)
 results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
 deconProp <- results$theta
 deconGexp <- results$beta
@@ -110,9 +91,65 @@ vizTopic(theta = deconProp, pos = pos, topic = i, plotTitle = i,
 
 ## Annotation strategy
 
+```{r}
+# load reference data set
+ref <- readRDS("~/data/ref_from_merged_subpop_down_main_clusters_for_CCI (1).rds")
+res.rctd <- readRDS("~/data/KSB14_RCTD.rds")
+cell_type_info <- res.rctd@cell_type_info
+# cell_type_info$renorm
+
+ctypes <- ref@cell_types
+ref.counts <- t(ref@counts) # ctype x gene
+dim(ref.counts)
+
+genes.sel <- colnames(deconGexp)
+ref.counts <- ref.counts[,genes.sel]
+
+# gene profiles
+rownames(ref.counts) <- ctypes
+ref.gexp <- as.matrix(ref.counts) %>%
+            as.data.frame() %>%
+            mutate(ctypes = ctypes) #%>%
+            # group_by(rownames) %>%
+            # summarise(across(everything(), mean)) %>%
+            # as.matrix()
+ref.gexp <- aggregate(. ~ ctypes, data = ref.gexp, FUN = mean)
+
+mode(ref.gexp) <- "numeric"
+ref.gexp
+```
+
+```{r}
+dim(deconGexp)
+dim(gexp)
+corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
+                          m1 = as.matrix(deconGexp),
+                          # the reference `beta` (celltypes x genes)
+                          m2 = as.matrix(ref.gexp),
+                          # "b" = comparing beta matrices, "t" for thetas
+                          type = "b")
+```
+
 # Define covariate
 
 ## Proximity to a specific cell type
+
+```{r}
+pos <- spatialCoords(se)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+plot(pos)
+
+# find interval between adjacent points 
+pos.sorted <- pos[order(pos[,1], decreasing = FALSE),]
+pos.diff <- pos.sorted[2:nrow(pos.sorted), ] - pos.sorted[1:nrow(pos.sorted) -1 , ]
+hist(pos.sorted[,2], breaks = 100)
+hist(pos.diff[,1], breaks = c(0, 1, 3, 5, max(pos.diff[,1])))
+
+pos.sorted <- pos[order(pos[,2], decreasing = FALSE),]
+pos.diff <- pos.sorted[2:nrow(pos.sorted), ] - pos.sorted[1:nrow(pos.sorted) -1 , ]
+hist(pos.diff[,2], breaks = c(0, 1, 3, 5, max(pos.diff[,2])))
+```
 
 ```{r}
 # Define target cell types
@@ -120,13 +157,10 @@ topic.target <- "9"
 prop.threshold <- 0.5  
 weight <- NULL
 
-pos <- spatialCoords(se)
+# dim(deconProp)
+# dim(deconGexp)
+# heatmap(deconGexp)
 
-
-dim(deconProp)
-dim(deconGexp)
-
-heatmap(deconGexp)
 deconProp_target <- deconProp[,topic.target]
 deconProp_target <- deconProp_target[deconProp_target > prop.threshold]
 
@@ -136,10 +170,10 @@ pos.target <-  pos[bc.target,]
 ```
 
 ```{r}
-
-pos <- spatialCoords(se)
-adjacency.matrix <- get.adjacency.matrix(pos)
-
+head(pos)
+class(pos[1,][[1]])
+adjacency.matrix <- get.adjacency.matrix(pos, nei.diff = seq(0,5))
+sum(adjacency.matrix)
 ```
 
 ```{r}
@@ -158,7 +192,8 @@ length(deconProp_target)
 dim(min.dists.mat)
 min.dists.mat
 # Calculate min dist: use graph later, not connected
-spl.norm <- (min.dists.mat - min(min.dists.mat)) / (max(min.dists.mat) - min(min.dists.mat))
+min.dists.mat.finite <- min.dists.mat[is.finite(min.dists.mat)]
+spl.norm <- (min.dists.mat - min(min.dists.mat)) / (max(min.dists.mat.finite) - min(min.dists.mat))
 spl.norm.prop <- sweep(spl.norm, 2, deconProp_target, FUN="/") # divide each row by target vector
 dists.min <- rowMins(spl.norm.prop)
 names(dists.min) <- rownames(pos)
@@ -190,13 +225,93 @@ as_tibble(pos) %>%
 # LEMUR
 
 ```{r}
-fit <- lemur(se, design = ~ min.dist, n_embedding = 30, test_fraction = 0.5)
-fit
-# fit <- test_de(fit, contrast = cond())
+cont2ordered <- function(x, n, from = min(x), to = max(x), add_label = TRUE, label_fmt = "%.2f"){
+  groups <- seq(from, to, length.out = n+1)
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n)
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    ordered(res, levels = seq_len(n), labels = labels)
+  }else{
+    res
+  }
+}
 
+cont2ordered(seq(0, 30), n = 6, label_fmt = "%.f")
+levels(cont2ordered(sce_subset$plaque_density, n = 10, label_fmt = "%.2f"))
+```
+
+```{r}
+sce_subset$plaque_cluster <- cont2ordered(sce_subset$plaque_density, n = 10, label_fmt = "%.2f")
+```
+
+```{r}
+{r}
+as_tibble(colData(sce_subset)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = sample), size = 0.3, stroke = 0) +
+    guides(color = guide_legend(override.aes = list(size = 1)))
+
+as_tibble(colData(sce_subset)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = cell_type_lumped), size = 0.3, stroke = 0) +
+    guides(color = guide_legend(override.aes = list(size = 1)))
+
+as_tibble(colData(sce_subset)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = plaque_density), size = 0.3, stroke = 0) +
+    scale_color_viridis_b()
+```
+
+```{r}
+set.seed(1)
+fit <- lemur::lemur(sce_subset, design = ~ plaque_cluster, n_embedding = 30, test_fraction = 0.6)
+set.seed(1)
+fit <- lemur::align_harmony(fit)
+```
+
+```{r}
+{r}
+fit <- lemur::test_de(fit, cond(plaque_cluster = "[0.90,1.00]") - cond(plaque_cluster = "[0.00,0.10)"))
+set.seed(1)
+nei <- lemur::find_de_neighborhoods(fit, group_by = vars(plaque_cluster, sample), test_method = "edgeR")
+```
+
+```{r}
+qs::qsave(sce_subset, "../data/cable_spatial_plaque_data/annotated_sce.qs")
+```
+
+```{r}
+fit_small <- fit["Jun",]
+nei_small <- nei %>% filter(name == "Jun")
+
+qs::qsave(fit_small, "../output/cable_spatial_plaque_data/fit_small.qs")
+qs::qsave(nei_small, "../output/cable_spatial_plaque_data/nei_small.qs")
 ```
 
 # Misc
+
+```{r}
+# Example vector
+vec <- c("a", "b", "c", "d", "e")
+# Convert the vector to a named list with integer names
+named_list <- setNames(as.list(vec), seq_along(vec))
+
+# Print the named list
+print(named_list)
+named_list$'1'
+```
 
 ```{r}
 library(igraph)
