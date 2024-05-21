@@ -104,6 +104,7 @@ components(g)$no
 bc.idxs <- seq.int(nrow(pos))
 
 target.idxs <- which(rownames(pos) %in% rownames(pos.target))
+length(target.idxs)
 min.dists.mat <- get.min.dists.mat(g, bc.idxs, target.idxs)
 dim(min.dists.mat)
 ```
@@ -224,38 +225,42 @@ qs::qsave(nei_small, "../output/cable_spatial_plaque_data/nei_small.qs")
 # Misc
 
 ```{r}
-library(purrr)
+# load counts and coords
+dir <-  '../data/SHK166_RA_Knee'
 
-# Create a partial function for mean with na.rm = TRUE
-mean_na_rm <- partial(mean, na.rm = TRUE)
+path.pos <- paste(dir, 'spatial/tissue_positions.csv', sep = '/')
+pos.info <- read.csv(path.pos)
 
-# Sample data frame
-data <- data.frame(
-  group = c('A', 'A', 'B', 'B'),
-  value1 = c(1, 2, NA, 4),
-  value2 = c(5, NA, 7, 8)
-)
+## filt out out-tissue pixels
+# pos.info <- subset(pos.info, in_tissue == 1)
+pos.full <- pos.info[, c('pxl_row_in_fullres', 'pxl_col_in_fullres')]
+plot(pos, cex = 0.1)
 
-# Using aggregate with the partial function
-result <- aggregate(. ~ group, data = data, FUN = mean_na_rm)
+diff.plot <- function(dim){
+  pos.sorted <- pos.full[order(pos.full[,dim], decreasing = FALSE),]
+  plot(head(pos.sorted, n =100))
+  head(pos.sorted, n =40)
+  6922 - 6763
+  # table(pos.diff)
+  pos.diff <- pos.sorted[2:nrow(pos.sorted), dim] - pos.sorted[1:nrow(pos.sorted) -1 , dim]
+  barplot(table(pos.diff), main="Diff counts", xlab="Diff", ylab="Count", border="red", col="blue", density=10)
+}
 
-print(result)
+diff.plot(1)
+diff.plot(2)
 
-```
+nrow <- nrow(pos.full)
+target <- pos.full[180,]
+dists <- c()
+for (i in seq_len(nrow)){
+  distance <- sum((target - pos.full[i,])^2)
+  dists <- c(dists, distance)
+}
+idxs <- order(dists)
+idxs <- idxs[1:7]
+plot(pos.full[idxs,])
+sort(dists)[1:10]
 
-```{r}
-library(igraph)
-
-# Create a sample graph (you can replace this with your own graph)
-g <- graph.ring(10)
-g <- add_vertices(g, 3, color = "red")
-plot(g)
-
-# Check if vertices 1 and 2 are connected
-are.connected(g, 1, 12)  # TRUE
-
-cl <- components(g)
-class(cl)
 
 ```
 

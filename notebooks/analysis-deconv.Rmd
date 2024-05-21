@@ -62,8 +62,7 @@ pos <- as.matrix(pos)
 
 ```{r}
 prior.k <- 19
-target.cell <- "PRG4+ Lining" 
-target.cell <- "Endothelial Cells"
+
 ```
 
 ## STDeconvolve
@@ -98,6 +97,11 @@ marker.genes <-  function(i, n = 10) {
 ```
 
 ### Annotation strategy
+
+```{r}
+target.cell <- "Endothelial Cells"
+target.cell <- "PRG4+ Lining" 
+```
 
 ```{r}
 # load reference data set
@@ -198,7 +202,7 @@ cell.idx.rctd
 colnames(deconProp.rctd) <- seq_len(ncol(deconProp.rctd))
 rownames(deconProp.rctd) <- rownames(pos)
 
-plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = 10, plotTitle = paste0("RCTD - ", target.cell),
+plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = matched.topic, plotTitle = paste0("RCTD - ", target.cell),
          size = 1, stroke = 0, alpha = 0.5,
          low = "white",
          high = "red")

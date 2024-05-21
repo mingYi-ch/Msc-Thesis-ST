@@ -176,7 +176,7 @@ order(corMtx_beta[16,], decreasing = T)
 corMtx_beta[16, 1]
 ```
 
-```{}
+```         
 ```
 
 ## RCTD
