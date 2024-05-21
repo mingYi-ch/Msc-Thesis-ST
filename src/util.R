@@ -117,8 +117,8 @@ get.min.dists.mat <- function(g, from, to) {
         # if a vertex is on the shortest path, we can calculate the shortest distance to the target vertex
         for (k in seq_len(len.path)) {
           idx <- vpath[k]
-          cat(idx, to.idx)
-          min.dists.mat[from.map$idx, as.character(j)] <- len.path - k
+          idx <-  as.character(idx)
+          min.dists.mat[from.map$idx, j] <- len.path - k
       }
       }
     }
