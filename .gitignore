@@ -7,7 +7,7 @@ renv
 *.png
 *.pdf
 data/.
-results/.
+results/*
 
 */renv
 

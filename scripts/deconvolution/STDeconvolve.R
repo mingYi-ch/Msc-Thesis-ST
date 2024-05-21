@@ -3,8 +3,10 @@ library(qs)
 source("./src/util.R")
 
 # load data as spatialExperiment object
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
-se <- load.data(dir)
+# TODO config
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee'
+data_dir <- './data/SHK166_RA_Knee'
+se <- load.data(data_dir)
 
 cd <- assay(se, "counts")
 
@@ -27,5 +29,5 @@ optLDA <- optimalModel(models = ldas, opt = opt.K)
 results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
 
 qs::qsave(ldas, "./results/deconvolution/STDeconvolve/ldas.qs")
-qs::qsave(results, "./results/deconvolution/STDeconvolve/deconRes.qs")
+qs::qsave(results, paste0("./results/deconvolution/STDeconvolve/deconRes_K", opt.K, ".qs"))
 

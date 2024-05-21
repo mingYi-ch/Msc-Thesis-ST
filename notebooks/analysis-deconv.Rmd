@@ -1,0 +1,361 @@
+---
+title: "Deconvolution"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+library(spacexr)
+library(purrr)
+
+library(ggcorrplot)
+
+```
+
+```{r}
+source("../src/util.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+# path for S3IT
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
+
+# path for local
+data_dir <- '../data'
+biopsy_dirs <- get.dirs(data_dir)
+```
+
+```{r}
+dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+se <- load.data(dir)
+
+pos <- spatialCoords(se)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+```
+
+# Deconvolution
+
+```{r}
+prior.k <- 19
+target.cell <- "PRG4+ Lining" 
+target.cell <- "Endothelial Cells"
+```
+
+## STDeconvolve
+
+```{r}
+# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
+res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
+if (!file.exists(res.path)) {
+  source("../scripts/deconvolution/STDeconvolve.R")
+}
+ldas <- qs::qread(res.path)
+
+# ldas$kneedOptK
+optLDA <- optimalModel(models = ldas, opt = prior.k)
+results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
+deconProp <- results$theta
+deconGexp <- results$beta
+
+# qs::qsave(deconProp, )
+```
+
+```{r}
+## visualize deconvolved cell-type proportions
+# vizAllTopics(deconProp, pos[rownames(deconProp),], r=55, lwd=0)	  
+
+## interpret these cell-types based on their gene expression
+# topGenes(deconGexp)
+## top genes based on log 2 (fold change) for each cell-type
+marker.genes <-  function(i, n = 10) {
+  head(sort(log2(deconGexp[i,]/colMeans(deconGexp[-i,])), decreasing=TRUE), n = n)
+}
+```
+
+### Annotation strategy
+
+```{r}
+# load reference data set
+dir.cluster <- "~/data/"
+dir.local <- "../../Spatial/"
+ref.name <- "ref_from_merged_subpop_down_main_clusters_for_CCI.rds"
+
+ref.dir <- dir.cluster
+if (!dir.exists(ref.dir)) {
+  ref.dir <- dir.local
+}
+
+ref <- readRDS(paste0(ref.dir, ref.name))
+
+ctypes <- ref@cell_types
+which(unique(ctypes) == target.cell )
+
+ref.counts <- t(ref@counts) # ctype x gene
+dim(ref.counts)
+
+genes.sel <- colnames(deconGexp)
+ref.counts <- ref.counts[,genes.sel]
+
+# gene profiles
+dim(ref.counts)
+mean.na.rm <- partial(mean, na.rm = TRUE)
+rownames(ref.counts) <- ctypes
+ref.counts <- as.matrix(ref.counts) %>%
+            as.data.frame() %>%
+            mutate(ctypes = ctypes)
+  
+ref.gexp <- aggregate(.~ ctypes, data = ref.counts, FUN = mean.na.rm) %>% as.matrix()
+
+ctypes.unique <- ref.gexp[,1]
+cell.idx <- which(ctypes.unique == target.cell)
+ref.gexp <- ref.gexp[, -1]
+mode(ref.gexp) <- "numeric"
+```
+
+```{r}
+corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
+                          m1 = as.matrix(deconGexp),
+                          # the reference `beta` (celltypes x genes)
+                          m2 = as.matrix(ref.gexp),
+                          # "b" = comparing beta matrices, "t" for thetas
+                          type = "b")
+```
+
+```{r}
+## row and column names need to be characters
+rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
+
+correlationPlot2(mat = corMtx_beta,
+                colLabs = "Deconvolved cell-types",
+                rowLabs = "Ground truth cell-types",
+                title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
+  ## this function returns a `ggplot2` object, so can add additional aesthetics
+ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
+                  axis.text.y = ggplot2::element_text(size = 8)) 
+
+# colnames(corMtx_beta) <- rownames(ref.gexp)
+rownames(corMtx_beta)
+colnames(corMtx_beta)
+matched.topic <- which.max(corMtx_beta[, cell.idx])
+matched.topic
+corMtx_beta[matched.topic, cell.idx]
+```
+
+```{r}
+plot.stdeconv <- vizTopic(theta = deconProp, pos = pos, topic = matched.topic, plotTitle = paste('STDeconv', matched.topic, target.cell, sep = " - "),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+```
+
+## RCTD
+
+```{r}
+res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
+cell_type_info <- res.rctd@cell_type_info
+res.rctd <- res.rctd@results
+dim(res.rctd[[1]])
+# cell_type_info$renorm
+deconProp.rctd <- res.rctd$weights %>% as.matrix()
+dim(pos)
+# rownames(deconProp.rctd)
+deconProp.rctd <- deconProp.rctd[paste0("SHK166_",rownames(pos)),] # in case rows are shuffled
+# rownames(deconProp.rctd)
+cell.idx.rctd <- which(colnames(deconProp.rctd) == target.cell )
+cell.idx.rctd
+```
+
+```{r}
+# pos
+# deconProp
+# class(deconProp.rctd)
+# deconProp.rctd
+colnames(deconProp.rctd) <- seq_len(ncol(deconProp.rctd))
+rownames(deconProp.rctd) <- rownames(pos)
+
+plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = 10, plotTitle = paste0("RCTD - ", target.cell),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+
+```
+
+## Comparison
+
+```{r}
+target.cell
+wrap_plots(plot.stdeconv, plot.rctd) 
+marker.genes(matched.topic, n = 8)
+```
+
+```{r}
+hist(deconProp[, matched.topic], breaks = 5)
+```
+
+## Utils
+
+```{r}
+correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annotation = FALSE, annotation_size = 0.5 ){
+  
+  correlation_palette <- grDevices::colorRampPalette(c("blue", "white", "red"))(n = 209)
+  correlation_breaks <- c(seq(-1,-0.01,length=100),
+                          seq(-0.009,0.009,length=10),
+                          seq(0.01,1,length=100))
+  
+  dat <- reshape2::melt(mat)
+  plt <- ggplot2::ggplot(data = dat) +
+    ggplot2::geom_tile(ggplot2::aes(x = Var1, y = Var2, fill=value)) +
+    
+    ggplot2::scale_y_discrete(breaks = as.character(dat$Var2), labels = as.character(dat$Var2))
+    
+    ## if correlation values are to be plotted in squares:
+    if(annotation){
+      plt <- plt + ggplot2::geom_text(ggplot2::aes(x = as.character(Var1), y = as.character(Var2), label = format(round(value, 2), nsmall = 2)), size = annotation_size)
+    }
+    
+    plt <- plt + ggplot2::theme(axis.text.x = ggplot2::element_text(size=12, color = "black", hjust = 0, vjust = 0.5),
+                   axis.text.y = ggplot2::element_text(size=12, color = "black"),
+                   axis.title.y = ggplot2::element_text(size=13),
+                   axis.title.x = ggplot2::element_text(size=13),
+                   plot.title = ggplot2::element_text(size=15),
+                   legend.text = ggplot2::element_text(size = 15, colour = "black"),
+                   legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 90),
+                   panel.background = ggplot2::element_blank(),
+                   ## border around plot
+                   panel.border = ggplot2::element_rect(fill = NA, color = "black", size = 2),
+                   plot.background = ggplot2::element_blank()
+                   # legend.position="none"
+      ) +
+      ## fix up colorbar legend
+      ggplot2::scale_fill_gradientn(limits = c(-1,1),
+                                    breaks = c(-1,0,1),
+                                    colors=(grDevices::colorRampPalette(c("blue","white","red")))(n = 209)
+      ) +
+      ggplot2::guides(fill = ggplot2::guide_colorbar(title = "Correlation",
+                                                     title.position = "left",
+                                                     title.hjust = 0.5,
+                                                     ticks.colour = "black",
+                                                     ticks.linewidth = 2,
+                                                     frame.colour= "black",
+                                                     frame.linewidth = 2,
+                                                     label.hjust = 0
+      )) +
+      
+      ggplot2::coord_fixed()
+  
+  if (!is.na(colLabs)){
+    plt <- plt + ggplot2::xlab(colLabs)
+  }
+  if (!is.na(rowLabs)){
+    plt <- plt + ggplot2::ylab(rowLabs)
+  }
+  if (!is.na(title)){
+    plt <- plt + ggplot2::ggtitle(title)
+  }
+  
+  return(plt)
+  
+}
+
+```
+
+# Misc
+
+```{r}
+library(igraph)
+
+# Create a sample graph (you can replace this with your own graph)
+g <- graph.ring(10)
+g <- add_vertices(g, 3, color = "red")
+plot(g)
+
+# Check if vertices 1 and 2 are connected
+are.connected(g, 1, 12)  # TRUE
+
+cl <- components(g)
+class(cl)
+
+```
+
+```{r}
+# Create a simple unweighted graph
+# Example edge list
+edges <- data.frame(from = c(0, 1, 1, 2), to = c(1, 2, 3, 3))
+
+# Create a graph from the edge list
+graph <- graph.data.frame(edges, directed = FALSE)  # Adjust 'directed' as needed
+
+
+# Specify source and target vertices
+source <- 1
+target <- 3
+
+# Find the shortest path
+shortest_paths <- shortest_paths(graph, from = source, to = target)
+shortest_paths$vpath
+# Check if a path exists
+if (length(shortest_paths) > 0) {
+    # Access the first shortest path (modify as needed)
+    shortest_path <- shortest_paths[[1]]
+
+    cat("Shortest path:", shortest_path)
+} else {
+    cat("No path exists between", source, "and", target)
+}
+
+
+```
+
+```{r}
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
+deconvolution_topic_features_k10 <- read.csv(path)
+head(deconvolution_topic_features_k10)
+colnames(deconvolution_topic_features_k10)
+
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
+deconvolved_spots_k10 <- read.csv(path)
+head(deconvolved_spots_k10)
+```
+
+```{r}
+# Create a matrix (you can replace this with your own data)
+my_matrix <- matrix(c(1, 2, 3, 4, 5, 6, 3, 3, -Inf), ncol = 3)
+
+# Calculate row minimums, ignoring NA values
+row_mins <- rowMins(my_matrix, na.rm = TRUE)
+
+# Print the result
+print(row_mins)
+
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>

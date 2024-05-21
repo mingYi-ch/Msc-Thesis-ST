@@ -75,7 +75,7 @@ get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshol
       pt1 <- coords[idx.1, ]
       pt2 <- coords[idx.2, ]
       
-      is.nei <- (pt1 - pt2)^2 < dist.sqr.threshold      
+      is.nei <- sum((pt1 - pt2)^2) < dist.sqr.threshold      
       if (is.nei) {
         adjacency.matrix[idx.1, idx.2] <- 1
         adjacency.matrix[idx.2, idx.1] <- 1
