@@ -1,5 +1,5 @@
 ---
-title: "Deconvolution"
+title: "LEMUR"
 output:
   html_document:
     df_print: paged
@@ -23,9 +23,8 @@ library(igraph)
 library(qs)
 
 library(spacexr)
-library(purrr)
+# library(purrr)
 
-library(ggcorrplot)
 
 ```
 
@@ -40,11 +39,12 @@ set.seed(5)
 ```
 
 ```{r}
-# path for S3IT
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
 
 # path for local
 data_dir <- '../data'
+
+# path for S3IT
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
 biopsy_dirs <- get.dirs(data_dir)
 ```
 
@@ -62,6 +62,7 @@ pos <- spatialCoords(se)
 pos <- pos[, c('x','y')]
 pos <- as.matrix(pos)
 
+prior.k <-  19
 # get deconProp
 # select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
 res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
@@ -104,25 +105,28 @@ components(g)$no
 bc.idxs <- seq.int(nrow(pos))
 
 target.idxs <- which(rownames(pos) %in% rownames(pos.target))
-length(target.idxs)
-min.dists.mat <- get.min.dists.mat(g, bc.idxs, target.idxs)
-dim(min.dists.mat)
+
+# get all min dists to target
+start_time <- Sys.time()
+start_time
+dists.mat <- get.all.dists(g, bc.idxs, target.idxs)
+end_time <- Sys.time()
+execution_time <- end_time - start_time
+cat("Sys.time execution time:", execution_time)
+
+length(dists.mat[is.finite(dists.mat)])
 ```
 
 ```{r}
 length(deconProp_target)
-dim(min.dists.mat)
-min.dists.mat
-# Calculate min dist: use graph later, not connected
-min.dists.mat.finite <- min.dists.mat[is.finite(min.dists.mat)]
-spl.norm <- (min.dists.mat - min(min.dists.mat)) / (max(min.dists.mat.finite) - min(min.dists.mat))
-spl.norm.prop <- sweep(spl.norm, 2, deconProp_target, FUN="/") # divide each row by target vector
-dists.min <- rowMins(spl.norm.prop)
-names(dists.min) <- rownames(pos)
+dim(dists.mat)
+min.dists <- get.min.dists(dists.mat, deconProp_target)
 
-se$dists.min <- min.dists.mat
+se$min.dists <- min.dists
 se
-dists.min
+finite.mask <- is.finite(min.dists)
+min.dists.finite <- min.dists[finite.mask]
+length(finite.mask)
 ```
 
 ```{r}
@@ -276,14 +280,26 @@ head(deconvolved_spots_k10)
 ```
 
 ```{r}
-# Create a matrix (you can replace this with your own data)
-my_matrix <- matrix(c(1, 2, 3, 4, 5, 6, 3, 3, -Inf), ncol = 3)
+# Sample data with duplicated column names
+counts <- matrix(1:12, nrow = 3, ncol = 4)
+colnames(counts) <- c("barcode1", "barcode2", "barcode2", "barcode3")
 
-# Calculate row minimums, ignoring NA values
-row_mins <- rowMins(my_matrix, na.rm = TRUE)
+# Print original column names
+print("Original column names:")
+print(colnames(counts))
 
-# Print the result
-print(row_mins)
+counts[, !duplicated(colnames(counts))]
+# Identify duplicate column names
+duplicate_colnames <- colnames(counts)[duplicated(colnames(counts))]
+print("Duplicate column names:")
+print(duplicate_colnames)
+# Rename duplicates to make them unique
+colnames(counts) <- make.unique(colnames(counts))
+
+# Print modified column names
+print("Modified column names:")
+print(colnames(counts))
+
 
 ```
 

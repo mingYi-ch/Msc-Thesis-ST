@@ -15,7 +15,6 @@ library(gghighlight)
 library(tidyverse)
 
 library(STdeconvolve)
-library(SpatialExperiment)
 library(lemur)
 library(igraph)
 
@@ -26,32 +25,41 @@ source("../src/util.R")
 ```
 
 ```{r}
-# Define the coordinates as a matrix
-coordinates <- matrix(c(
+# coords generated from chatGPT
+coords <- matrix(c(
   0, 0, 1, 0, 2, 0,
   0, 1, 1, 1, 2, 1,
-  0, 2, 1, 2, 2, 2,
-  0, 3, 1, 3, 2, 3
+  0, 2, 1, 2, 2, 2
 ), ncol = 2, byrow = TRUE)
 
 ```
 
 ```{r}
-adjacency.matrix <- get.adjacency.matrix(coordinates, nei.diff = c(-1, 0, 1))
+adjacency.matrix <- get.adjacency.matrix(coords, dist.sqr.threshold = 2.5)
 sum(adjacency.matrix)
 
 # build a graph
 g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
-components(g)
 
 g <- add_vertices(g, 3)
+g <- add_edges(g, edges = c(10, 11))
+
+# color target vertices
+to <- c(2, 4, 10)
+for (v in to) {
+  V(g)[v]$color <- 'blue'
+}
+
 plot(g)
+components(g)
+plot(g, vertex.label = V(g)$label, vertex.color = V(g)$color)
+
 ```
 
 ```{r}
-to <- c(2, 4, 10)
-from <- 1:15
+from <- 1:12
 from
 to
-min.dists.mat <- get.min.dists.mat(g, from, to)
+min.dists.mat <- get.all.dists(g, from, to)
+min.dists.mat
 ```

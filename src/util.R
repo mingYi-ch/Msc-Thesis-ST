@@ -86,7 +86,7 @@ get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshol
 }
 
 
-get.min.dists.mat <- function(g, from, to) {
+get.all.dists <- function(g, from, to) {
   # get components
   membership <- components(g)$membership
   # find shortest dist, DP 
@@ -96,19 +96,20 @@ get.min.dists.mat <- function(g, from, to) {
   from.map <- as.list(seq_len(len.from))
   names(from.map) <- from
   
-  min.dists.mat <- matrix(data = NA, nrow = len.from, ncol = len.to)
+  dists.mat <- matrix(data = NA, nrow = len.from, ncol = len.to)
   
   for (i in seq_len(len.from)) {
     for (j in seq_len(len.to)) {
       from.idx <- from[i]
       to.idx <- to[j]
-      if (!is.na(min.dists.mat[i, j])) {
+      if (!is.na(dists.mat[i, j])) {
+        # print(to.idx)
         next
       }else if(membership[from.idx] != membership[to.idx]){
         # no path between them
-        cnt.v <- Inf
+        dists.mat[i, j] <- Inf
       }else if(from.idx == to.idx) {
-        cnt.v <- 0
+        dists.mat[i, j] <- 0
       }else{
         shortest_path <- shortest_paths(g, from = from.idx, to = to.idx, output = "vpath")
         vpath <- shortest_path$vpath 
@@ -118,13 +119,24 @@ get.min.dists.mat <- function(g, from, to) {
         for (k in seq_len(len.path)) {
           idx <- vpath[k]
           idx <-  as.character(idx)
-          min.dists.mat[from.map$idx, j] <- len.path - k
-      }
+          dists.mat[from.map[[idx]], j] <- len.path - k
+        }
       }
     }
-    # break
   }
-  return(min.dists.mat)
+  return(dists.mat)
 }
 
-
+get.min.dists <- function(dists.mat, weights) {
+  # scale to the range of 0 to 1
+  dists.mat.finite <- dists.mat[is.finite(dists.mat)]
+  
+  spl.norm <- (dists.mat - min(dists.mat)) / (max(dists.mat.finite) - min(dists.mat))
+  spl.norm.prop <- sweep(spl.norm, MARGIN = 2, STATS = weights, FUN="/") # divide each row by target vector
+  
+  # get min dist to a certain target
+  min.dists <- rowMins(spl.norm.prop)
+  names(min.dists) <- rownames(pos)
+  
+  return(min.dists)
+}

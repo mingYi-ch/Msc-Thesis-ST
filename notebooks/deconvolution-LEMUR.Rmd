@@ -260,7 +260,7 @@ length(components(g)$membership)
 bc.idxs <- seq.int(nrow(pos))
 
 target.idxs <- which(rownames(pos) %in% rownames(pos.target))
-min.dists.mat <- get.min.dists.mat(g, bc.idxs, target.idxs)
+min.dists.mat <- get.all.dists(g, bc.idxs, target.idxs)
 ```
 
 ```{r}

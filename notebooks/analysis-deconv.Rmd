@@ -26,12 +26,13 @@ library(qs)
 library(spacexr)
 library(purrr)
 
-library(ggcorrplot)
+# library(ggcorrplot)
 
 ```
 
 ```{r}
 source("../src/util.R")
+source("../config/config.R")
 ```
 
 # Load data
@@ -41,16 +42,7 @@ set.seed(5)
 ```
 
 ```{r}
-# path for S3IT
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
-
-# path for local
-data_dir <- '../data'
-biopsy_dirs <- get.dirs(data_dir)
-```
-
-```{r}
-dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+dir <-  get.std.path()
 se <- load.data(dir)
 
 pos <- spatialCoords(se)
@@ -101,6 +93,7 @@ marker.genes <-  function(i, n = 10) {
 ```{r}
 target.cell <- "Endothelial Cells"
 target.cell <- "PRG4+ Lining" 
+target.cell <- "MerTK+Macrophages" 
 ```
 
 ```{r}
@@ -154,13 +147,13 @@ corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
 ## row and column names need to be characters
 rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
 
-correlationPlot2(mat = corMtx_beta,
-                colLabs = "Deconvolved cell-types",
-                rowLabs = "Ground truth cell-types",
-                title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
-  ## this function returns a `ggplot2` object, so can add additional aesthetics
-ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
-                  axis.text.y = ggplot2::element_text(size = 8)) 
+# correlationPlot2(mat = corMtx_beta,
+#                 colLabs = "Deconvolved cell-types",
+#                 rowLabs = "Ground truth cell-types",
+#                 title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
+#   ## this function returns a `ggplot2` object, so can add additional aesthetics
+# ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
+#                   axis.text.y = ggplot2::element_text(size = 8)) 
 
 # colnames(corMtx_beta) <- rownames(ref.gexp)
 rownames(corMtx_beta)
@@ -180,18 +173,14 @@ plot.stdeconv <- vizTopic(theta = deconProp, pos = pos, topic = matched.topic, p
 ## RCTD
 
 ```{r}
-res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
-cell_type_info <- res.rctd@cell_type_info
+# res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
+dir <- get.res.dir()
+res.rctd <- qs::qread(file.path(dir, "deconvolution/RCTD/myRCTD.qs"))
 res.rctd <- res.rctd@results
-dim(res.rctd[[1]])
-# cell_type_info$renorm
-deconProp.rctd <- res.rctd$weights %>% as.matrix()
-dim(pos)
-# rownames(deconProp.rctd)
-deconProp.rctd <- deconProp.rctd[paste0("SHK166_",rownames(pos)),] # in case rows are shuffled
-# rownames(deconProp.rctd)
+ctypes <- colnames(res.rctd$norm_weights)
+
+deconProp.rctd <- res.rctd$norm_weights %>% as.matrix()
 cell.idx.rctd <- which(colnames(deconProp.rctd) == target.cell )
-cell.idx.rctd
 ```
 
 ```{r}
@@ -200,8 +189,6 @@ cell.idx.rctd
 # class(deconProp.rctd)
 # deconProp.rctd
 colnames(deconProp.rctd) <- seq_len(ncol(deconProp.rctd))
-rownames(deconProp.rctd) <- rownames(pos)
-
 plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = matched.topic, plotTitle = paste0("RCTD - ", target.cell),
          size = 1, stroke = 0, alpha = 0.5,
          low = "white",
@@ -211,11 +198,38 @@ plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = matched.topic, 
 
 ## Comparison
 
+### Average proportions Barplot
+
+```{r}
+avg.prop.bp <- function(deconProp) {
+  avg.prop <- colSums(deconProp) / nrow(deconProp)
+  bp <- barplot(
+    avg.prop,
+    # names.arg = ctypes,
+    names.arg = seq(length(avg.prop)),
+    las = 2,  # Rotate x-axis labels to be vertical
+    col = "lightblue",
+    main = "Average Proportions by Cell Type"
+  )
+  return(bp)
+}
+
+avg.prop.bp(deconProp) # STDeconv
+avg.prop.bp(deconProp.rctd) # STDeconv
+
+
+
+```
+
+### Visualization of a certain cell type
+
 ```{r}
 target.cell
 wrap_plots(plot.stdeconv, plot.rctd) 
 marker.genes(matched.topic, n = 8)
 ```
+
+### Agreement on marker genes 
 
 ```{r}
 hist(deconProp[, matched.topic], breaks = 5)
