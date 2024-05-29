@@ -27,6 +27,7 @@ library(spacexr)
 library(purrr)
 
 # library(ggcorrplot)
+library(imager)
 
 ```
 
@@ -83,16 +84,16 @@ deconGexp <- results$beta
 ## interpret these cell-types based on their gene expression
 # topGenes(deconGexp)
 ## top genes based on log 2 (fold change) for each cell-type
-marker.genes <-  function(i, n = 10) {
-  head(sort(log2(deconGexp[i,]/colMeans(deconGexp[-i,])), decreasing=TRUE), n = n)
+get.marker.genes <-  function(i, n = 10, gexp = deconGexp) {
+  head(sort(log2(gexp[i,]/colMeans(gexp[-i,])), decreasing=TRUE), n = n)
 }
 ```
 
 ### Annotation strategy
 
 ```{r}
-target.cell <- "Endothelial Cells"
 target.cell <- "PRG4+ Lining" 
+target.cell <- "Endothelial Cells"
 target.cell <- "MerTK+Macrophages" 
 ```
 
@@ -132,6 +133,13 @@ ctypes.unique <- ref.gexp[,1]
 cell.idx <- which(ctypes.unique == target.cell)
 ref.gexp <- ref.gexp[, -1]
 mode(ref.gexp) <- "numeric"
+
+ctypes.unique
+# CD1c+ DCs Macrophages
+# CD4+ Tcells CD4 CD8 -> T Cells
+# Sublining 
+# Lining
+
 ```
 
 ```{r}
@@ -147,13 +155,13 @@ corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
 ## row and column names need to be characters
 rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
 
-# correlationPlot2(mat = corMtx_beta,
-#                 colLabs = "Deconvolved cell-types",
-#                 rowLabs = "Ground truth cell-types",
-#                 title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
-#   ## this function returns a `ggplot2` object, so can add additional aesthetics
-# ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
-#                   axis.text.y = ggplot2::element_text(size = 8)) 
+correlationPlot2(mat = corMtx_beta,
+                colLabs = "Deconvolved cell-types",
+                rowLabs = "Ground truth cell-types",
+                title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
+  ## this function returns a `ggplot2` object, so can add additional aesthetics
+ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
+                  axis.text.y = ggplot2::element_text(size = 8))
 
 # colnames(corMtx_beta) <- rownames(ref.gexp)
 rownames(corMtx_beta)
@@ -225,17 +233,32 @@ avg.prop.bp(deconProp.rctd) # STDeconv
 
 ```{r}
 target.cell
-wrap_plots(plot.stdeconv, plot.rctd) 
-marker.genes(matched.topic, n = 8)
+# wrap_plots(plot.stdeconv, plot.rctd) 
+plot.stdeconv
+plot.rctd
 ```
 
-### Agreement on marker genes 
+```{r}
+image_path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/spatial/tissue_lowres_image.png"
+img <- load.image(image_path)
+img
+```
+
+### Agreement on marker genes
+
+```{r}
+pred.mg <- get.marker.genes(matched.topic, n = 100)
+true.mg <- get.marker.genes(matched.topic, n = 100, gexp = ref.gexp)
+
+diff.genes <- setdiff(names(pred.mg), names(true.mg))
+100 - length(diff.genes)
+```
+
+## Utils
 
 ```{r}
 hist(deconProp[, matched.topic], breaks = 5)
 ```
-
-## Utils
 
 ```{r}
 correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annotation = FALSE, annotation_size = 0.5 ){

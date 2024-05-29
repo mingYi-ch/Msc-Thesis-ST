@@ -61,5 +61,8 @@ from <- 1:12
 from
 to
 min.dists.mat <- get.all.dists(g, from, to)
-min.dists.mat
+weights <- rep(1, ncol(min.dists.mat))
+get.min.dists(min.dists.mat, weights)
+
+
 ```

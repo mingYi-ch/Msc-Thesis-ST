@@ -1,0 +1,426 @@
+---
+title: "LEMUR"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+library(dplyr)
+library(spacexr)
+# library(purrr)
+
+
+```
+
+```{r}
+source("../src/util.R")
+source("../config/config.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+
+# path for local
+data_dir <- '../data'
+
+# path for S3IT
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
+biopsy_dirs <- get.dirs(data_dir)
+```
+
+```{r}
+dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+se <- load.data(dir)
+se
+```
+
+# Define covariate
+
+## Proximity to a specific cell type
+
+```{r}
+pos <- spatialCoords(se)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+
+prior.k <-  19
+# get deconProp
+# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
+res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
+if (!file.exists(res.path)) {
+  source("../scripts/deconvolution/STDeconvolve.R")
+}
+ldas <- qs::qread(res.path)
+
+# ldas$kneedOptK
+optLDA <- optimalModel(models = ldas, opt = prior.k)
+results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
+deconProp <- results$theta
+```
+
+```{r}
+# Define target cell types
+topic.target <- "2"
+prop.threshold <- 0.2
+weight <- NULL
+
+deconProp_target <- deconProp[,topic.target]
+deconProp_target <- deconProp_target[deconProp_target > prop.threshold]
+
+length(deconProp_target)
+bc.target <- names(deconProp_target)
+pos.target <-  pos[bc.target,]
+```
+
+```{r}
+class(pos[1,][[1]])
+adjacency.matrix <- get.adjacency.matrix(pos, dist.sqr.threshold = 9000)
+sum(adjacency.matrix)
+```
+
+```{r}
+# build a graph
+g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+components(g)$no
+
+bc.idxs <- seq.int(nrow(pos))
+
+target.idxs <- which(rownames(pos) %in% rownames(pos.target))
+
+# get all min dists to target
+start_time <- Sys.time()
+dists.mat <- get.all.dists(g, bc.idxs, target.idxs)
+end_time <- Sys.time()
+execution_time <- end_time - start_time
+cat("Sys.time execution time:", execution_time)
+
+length(dists.mat[is.finite(dists.mat)])
+```
+
+```{r}
+length(deconProp_target)
+dim(dists.mat)
+weights <- deconProp_target
+weights <- rep(1, length(deconProp_target))
+min.dists <- get.min.dists(dists.mat, weights)
+
+se$min.dists <- min.dists
+
+```
+
+# Prepare LEMUR
+
+```{r}
+# add Inf, n + 1 groups
+bin.dists <- function(x, n, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
+  groups <- seq(from, to, length.out = n+1)
+  
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n + 1)
+  
+  groups <- c(groups, Inf)
+  res[is.infinite(x)] <- n + 1
+  labels[n + 1] <- "Inf"
+  
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    factor(res, levels = seq_len(n + 1), labels = labels)
+  }else{
+    res
+  }
+}
+
+bin.dists(seq(20, 10), n = 6, label_fmt = "%.f")
+```
+
+```{r}
+# add Inf, n + 1 groups
+bin.dists2 <- function(x, add_label = TRUE, label_fmt = "%.3f"){
+  # groups <- seq(from, to, length.out = n+1)
+  groups <-c(0, 0.01,  0.02, 0.03, 0.04, 0.06, 0.12)
+  n <- length(groups) -1
+  
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n + 1)
+  
+  groups <- c(groups, Inf)
+  res[is.infinite(x)] <- n + 1
+  labels[n + 1] <- "Inf"
+  
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    factor(res, levels = seq_len(n + 1), labels = labels)
+  }else{
+    res
+  }
+}
+
+```
+
+```{r}
+se$dist.cluster <- bin.dists2(se$min.dists, label_fmt = "%.3f")
+table(se$dist.cluster)
+ 
+```
+
+```{r}
+set.seed(1)
+logcounts(se) <- transformGamPoi::shifted_log_transform(se)
+umap <- scater::calculateUMAP(se)
+reducedDim(se, withDimnames = FALSE) <- umap
+
+```
+
+```{r}
+set.seed(1)
+# Remove inf
+finite.mask <- is.finite(min.dists)
+min.dists.finite <- min.dists[finite.mask]
+se.finite <- se[, finite.mask]
+se.finite$dist.cluster <- droplevels(se.finite$dist.cluster)
+table(se.finite$dist.cluster)
+
+# subset genes
+# se.finite <- se.finite[1:100, ]
+dim(se.finite)
+fit <- lemur::lemur(se.finite, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
+set.seed(1)
+fit <- lemur::align_harmony(fit)
+```
+
+```{r}
+table(se.finite$dist.cluster)
+
+bin.levels <- levels(se.finite$dist.cluster)
+fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[length(bin.levels)]) - cond(dist.cluster = bin.levels[1]))
+set.seed(1)
+DE <- assay(fit, "DE")
+dim(DE)
+
+nei <- lemur::find_de_neighborhoods(fit, group_by = vars(sample_id, dist.cluster), test_method = "none")
+```
+
+```{r}
+res.dir <- file.path(get.res.dir(), "LEMUR")
+if (!dir.exists(res.dir)) {
+  dir.create(res.dir)
+}
+
+qs::qsave(se, file.path(res.dir, "se_dist.qs"))
+```
+
+```{r}
+# target gene CD19 THY1
+target.genes <- c("CD19", "THY1", "NOC2L")
+fit_small <- fit[target.genes,]
+nei_small <- nei %>% filter(name %in% target.genes)
+
+qs::qsave(fit_small, file.path(res.dir, "fit_small.qs"))
+qs::qsave(nei_small, file.path(res.dir, "nei_small.qs"))
+```
+
+# Analysis
+
+```{r}
+res.dir <- file.path(get.res.dir(), "LEMUR")
+fit_small <- qs::qread(file.path(res.dir, "fit_small.qs"))
+nei_small <- qs::qread(file.path(res.dir, "nei_small.qs"))
+```
+
+```{r}
+hist(deconProp[, matched.topic], breaks = 5)
+```
+
+```{r}
+# plot dists
+## pos
+# some spots are filled out by quality control
+# pos <- pos[rownames(deconProp),]
+as_tibble(pos) %>%
+  mutate(bc = rownames(pos)) %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_point(size = 1, color = "grey") +
+    gghighlight(bc %in% rownames(pos.target)) +
+    geom_point(col = "blue", size = 1) +
+    labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
+
+## dists
+as_tibble(pos) %>%
+  mutate(dists = min.dists) %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_point(aes(color = dists), size = 1, stroke = 0) +
+    scale_color_gradient2()
+## umap
+as_tibble(colData(se)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = min.dists), size = 0.3, stroke = 0) +
+    scale_color_viridis_b()
+```
+
+# Misc
+
+```{r}
+# Install and load necessary packages
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager")
+}
+BiocManager::install("glmGamPoi")
+library(SingleCellExperiment)
+library(dplyr)
+library(glmGamPoi)
+
+# Create example counts matrix (20 genes, 10 cells)
+counts <- matrix(rpois(200, lambda = 10), nrow = 20, ncol = 10)
+rownames(counts) <- paste0("Gene", 1:20)
+colnames(counts) <- paste0("Cell", 1:10)
+
+# Create column metadata
+col_data <- DataFrame(
+    sample_id = rep(paste0("Sample", 1:3), length.out = 10),
+    condition = rep(c("Control", "Treatment"), length.out = 10)
+)
+
+# Create a SingleCellExperiment object
+sce <- SingleCellExperiment(assays = list(counts = counts))
+colData(sce) <- col_data
+
+# Aggregate counts by sample to create pseudobulk data
+pseudobulk_counts <- as.matrix(t(aggregate(counts, by = list(col_data$sample_id), FUN = sum)))
+colnames(pseudobulk_counts) <- unique(col_data$sample_id)
+pseudobulk_counts <- pseudobulk_counts[-1,]  # Remove the Group.1 row which contains the sample IDs
+
+# Sample metadata
+sample_metadata <- unique(col_data[, c("sample_id", "condition")])
+
+# Design matrix
+design <- model.matrix(~ condition, data = sample_metadata)
+
+# Ensure design matrix matches the pseudobulk data columns
+design <- design[match(colnames(pseudobulk_counts), sample_metadata$sample_id), ]
+
+# Fit the model using glmGamPoi
+fit <- glm_gp(pseudobulk_counts, design = design)
+
+# Check the results
+summary(fit)
+
+```
+
+```{r}
+# load counts and coords
+dir <-  '../data/SHK166_RA_Knee'
+
+path.pos <- paste(dir, 'spatial/tissue_positions.csv', sep = '/')
+pos.info <- read.csv(path.pos)
+
+## filt out out-tissue pixels
+pos.info <- subset(pos.info, in_tissue == 1)
+pos.full <- pos.info[, c('pxl_row_in_fullres', 'pxl_col_in_fullres')]
+plot(pos, cex = 0.1)
+
+diff.plot <- function(dim){
+  pos.sorted <- pos.full[order(pos.full[,dim], decreasing = FALSE),]
+  plot(head(pos.sorted, n =100))
+  head(pos.sorted, n =40)
+  6922 - 6763
+  # table(pos.diff)
+  pos.diff <- pos.sorted[2:nrow(pos.sorted), dim] - pos.sorted[1:nrow(pos.sorted) -1 , dim]
+  barplot(table(pos.diff), main="Diff counts", xlab="Diff", ylab="Count", border="red", col="blue", density=10)
+}
+
+diff.plot(1)
+diff.plot(2)
+
+nrow <- nrow(pos.full)
+target <- pos.full[180,]
+dists <- c()
+for (i in seq_len(nrow)){
+  distance <- sum((target - pos.full[i,])^2)
+  dists <- c(dists, distance)
+}
+idxs <- order(dists)
+idxs <- idxs[1:7]
+plot(pos.full[idxs,])
+sort(dists)[1:10]
+
+
+```
+
+```{r}
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
+deconvolution_topic_features_k10 <- read.csv(path)
+head(deconvolution_topic_features_k10)
+colnames(deconvolution_topic_features_k10)
+
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
+deconvolved_spots_k10 <- read.csv(path)
+head(deconvolved_spots_k10)
+```
+
+```{r}
+# Sample data with duplicated column names
+counts <- matrix(1:12, nrow = 3, ncol = 4)
+colnames(counts) <- c("barcode1", "barcode2", "barcode2", "barcode3")
+
+# Print original column names
+print("Original column names:")
+print(colnames(counts))
+
+counts[, !duplicated(colnames(counts))]
+# Identify duplicate column names
+duplicate_colnames <- colnames(counts)[duplicated(colnames(counts))]
+print("Duplicate column names:")
+print(duplicate_colnames)
+# Rename duplicates to make them unique
+colnames(counts) <- make.unique(colnames(counts))
+
+# Print modified column names
+print("Modified column names:")
+print(colnames(counts))
+
+
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>

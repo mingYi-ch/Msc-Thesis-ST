@@ -16,8 +16,9 @@ counts.sc <- ref@counts
 ctypes <- ref@cell_types
 colnames(counts.sc) <- ctypes
 ref@counts <- counts.sc
-# ref@cell_types <- unique(ctypes)
 
+file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
+write.csv(counts.sc, file = , row.names = TRUE)
 counts <- assay(se, "counts") # gene by barcode
 
 # Count occurrences of each column name
@@ -38,7 +39,7 @@ puck <- SpatialRNA(coords_df, counts, nUMI)
 # hist(log(puck@nUMI,2)) # histogram of log_2 nUMI
 
 myRCTD <- create.RCTD(puck, ref, max_cores = 16, CELL_MIN_INSTANCE = 1)
-myRCTD <- run.RCTD(myRCTD, doublet_mode = 'doublet')
+myRCTD <- run.RCTD(myRCTD, doublet_mode = 'full')
 
 # normalization per pixel
 results <- myRCTD@results

@@ -1,30 +1,16 @@
 ---
-title: "LEMUR"
-output:
-  html_document:
-    df_print: paged
-output.width: "75%"
+title: "R Notebook"
 ---
 
 # Library
 
 ```{r}
-library(Matrix)
-library(ggplot2)
-library(gghighlight)
 library(tidyverse)
-library(dplyr)
-
-
-library(STdeconvolve)
-library(SpatialExperiment)
+library(glue)
+library(SingleCellExperiment)
 library(lemur)
-library(igraph)
-library(qs)
 
-library(spacexr)
-# library(purrr)
-
+library(gghighlight)
 
 ```
 
@@ -35,104 +21,157 @@ source("../src/util.R")
 # Load data
 
 ```{r}
-set.seed(5)
+res.dir <- file.path(get.res.dir(), "LEMUR")
+fit <- qs::qread(file.path(res.dir, "fit_small.qs"))
+nei <- qs::qread(file.path(res.dir, "nei_small.qs"))
 ```
+
+# Analysis
+
+## Dist without Lemur
 
 ```{r}
 
-# path for local
-data_dir <- '../data'
+```
 
-# path for S3IT
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
-biopsy_dirs <- get.dirs(data_dir)
+## Dist Clusters in UMAP
+
+```{r}
+set.seed(1)
+umap <- uwot::umap(t(fit$embedding))
 ```
 
 ```{r}
-dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
-se <- load.data(dir)
+as_tibble(colData(fit)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = dist.cluster), size = 0.7, stroke = 0) +
+    guides(color = guide_legend(override.aes = list(size = 1)))
 ```
 
-# Define covariate
-
-## Proximity to a specific cell type
-
 ```{r}
-pos <- spatialCoords(se)
-pos <- pos[, c('x','y')]
-pos <- as.matrix(pos)
+genes_of_interest <- nei$name[1] # NOC2L
+genes_of_interest <- nei$name[3]
+genes_of_interest <- nei$name[2]
+genes_of_interest
+```
 
-prior.k <-  19
-# get deconProp
-# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
-res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
-if (!file.exists(res.path)) {
-  source("../scripts/deconvolution/STDeconvolve.R")
+## Correlation plot
+
+```{r, paged.print=FALSE}
+
+mask <- matrix(NA, nrow = length(genes_of_interest), ncol = ncol(fit), 
+               dimnames = list(genes_of_interest, colnames(fit)))
+mask2 <- matrix(1, nrow = length(genes_of_interest), ncol = ncol(fit), 
+               dimnames = list(genes_of_interest, colnames(fit)))
+for(id in genes_of_interest){
+  mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
+  mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
 }
-ldas <- qs::qread(res.path)
 
-# ldas$kneedOptK
-optLDA <- optimalModel(models = ldas, opt = prior.k)
-results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
-deconProp <- results$theta
+psce2 <- glmGamPoi::pseudobulk(SingleCellExperiment(list(inside = as.matrix(logcounts(fit)[genes_of_interest,,drop=FALSE] * mask),
+                                                        outside = as.matrix(logcounts(fit)[genes_of_interest,,drop=FALSE] * mask2))),
+                      group_by = vars(sample_id, dist.cluster), n = n(),
+                      aggregation_functions = list(.default = \(...) matrixStats::rowMeans2(..., na.rm = TRUE)),
+                      col_data = as.data.frame(colData(fit)))
+
+comparison_data <- as_tibble(colData(psce2)) %>%
+  mutate(expr_inside = as_tibble(t(assay(psce2, "inside"))),
+         expr_outside = as_tibble(t(assay(psce2, "outside")))) %>%
+  unpack(starts_with("expr"), names_sep = "-") %>%
+  pivot_longer(starts_with("expr"), names_sep = "[-_]", names_to = c(".value", "origin", "symbol")) 
+
+
+comparison_data$expr
+comparison_data$origin
+
+expr_comparison_pl <- comparison_data %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
+  ggplot(aes(x = dist.cluster, y = expr)) +
+    geom_point(aes(color = origin), size = 1) +
+    geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, se = FALSE, linewidth = 2) +
+    scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
+    scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression(log transformed)",
+         subtitle = paste0(genes_of_interest, " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_pl
 ```
 
 ```{r}
-# Define target cell types
-topic.target <- "2"
-prop.threshold <- 0.2
-weight <- NULL
+expr_comparison_scatter <- comparison_data %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
+  ggplot(aes(x = dist.cluster, y = expr)) +
+    geom_point(aes(color = origin), size = 1) +
+    # geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, se = FALSE, linewidth = 2) +
+    scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
+    scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0(genes_of_interest, " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
 
-deconProp_target <- deconProp[,topic.target]
-deconProp_target <- deconProp_target[deconProp_target > prop.threshold]
+expr_comparison_scatter
+```
 
-length(deconProp_target)
-bc.target <- names(deconProp_target)
-pos.target <-  pos[bc.target,]
+```{r, paged.print=FALSE}
+is_inside <- tibble(symbol = genes_of_interest, cell_id = list(colnames(fit))) %>%
+  left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
+  mutate(inside = map2(cell_id, neighborhood, \(ref, nei_pixels) ref %in% nei_pixels)) %>%
+  dplyr::select(-neighborhood) %>%
+  unnest(c(inside, cell_id))
+
+de_plot_data <- as_tibble(colData(fit), rownames = "cell_id") %>%
+  mutate(umap = umap) %>%
+  mutate(de = as_tibble(t(assay(fit[genes_of_interest,], "DE")))) %>%
+  unnest(de, names_sep = "-") %>%
+  pivot_longer(starts_with("de-"), names_sep = "-", values_to = "de", names_to = c(NA, "symbol")) %>%
+  inner_join(is_inside, by = c("symbol", "cell_id")) %>%
+  sample_frac(size = 1) 
+
+abs_max <- max(abs(quantile(de_plot_data$de, c(0.95, 0.05))))
+
+dist_de_pl <- de_plot_data %>%
+  mutate(inside = ifelse(inside, "in", "out")) %>%
+  mutate(inside = factor(inside, levels = c("in", "out")))  %>%
+  ggplot(aes(x = umap[,2], y = umap[,1])) +
+    ggrastr::rasterise(geom_point(aes(color = de), size = 0.5, stroke = 0), dpi = 600) +
+    # scale_colour_gradient2_rev(limits = c(-1, 1) * abs_max, oob = scales::squish, breaks = c(-1, 0, 1) * signif_to_zero(abs_max, 1), mid = "lightgrey") +
+    scale_color_de_gradient(abs_max, mid_width = 0.2) +
+    facet_grid(vars(inside), labeller = labeller(inside = as_labeller(c("in" = "pixels in Neighb.", "out" = "All other pixels"))),
+               switch="y") +
+    small_axis("", fontsize = font_size_small) +
+    theme(legend.position = "bottom", legend.margin = margin(t = -2, unit = "mm")) +
+    guides(color = guide_colorbar(barheight = unit(1, "mm"), barwidth = unit(15, "mm"), title.vjust = 1)) +
+    labs(color = "$\\Delta$")
+
+dist_de_pl
+```
+
+```{r, paged.print=FALSE}
+rel_plt <- colData(fit) %>%
+  as_tibble(rownames = "cell_id") %>%
+  left_join(is_inside) %>%
+  dplyr::count(dist.cluster, symbol, inside) %>%
+  mutate(frac = n / sum(n), .by = c(symbol, inside)) %>%
+  mutate(dist.cluster = fct_relabel(dist.cluster, \(x) str_replace(x, ",", ", "))) %>%
+  ggplot(aes(x = dist.cluster, y = frac)) +
+    geom_col(aes(fill = inside), position = position_dodge2()) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    scale_x_discrete(position = "top") +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "lightgrey")) +
+    guides(x = guide_axis(angle = 90)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Rel. No. pixels")
+
+ expr_comparison_scatter / rel_plt 
 ```
 
 ```{r}
-class(pos[1,][[1]])
-adjacency.matrix <- get.adjacency.matrix(pos, dist.sqr.threshold = 9000)
-sum(adjacency.matrix)
-```
-
-```{r}
-# build a graph
-g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
-components(g)$no
-
-bc.idxs <- seq.int(nrow(pos))
-
-target.idxs <- which(rownames(pos) %in% rownames(pos.target))
-
-# get all min dists to target
-start_time <- Sys.time()
-start_time
-dists.mat <- get.all.dists(g, bc.idxs, target.idxs)
-end_time <- Sys.time()
-execution_time <- end_time - start_time
-cat("Sys.time execution time:", execution_time)
-
-length(dists.mat[is.finite(dists.mat)])
-```
-
-```{r}
-length(deconProp_target)
-dim(dists.mat)
-min.dists <- get.min.dists(dists.mat, deconProp_target)
-
-se$min.dists <- min.dists
-se
-finite.mask <- is.finite(min.dists)
-min.dists.finite <- min.dists[finite.mask]
-length(finite.mask)
-```
-
-```{r}
-# some spots are filled out by quality control
-pos <- pos[rownames(deconProp),]
-
 as_tibble(pos) %>%
   mutate(bc = rownames(pos)) %>%
   ggplot(aes(x = x, y = y)) +
@@ -141,170 +180,15 @@ as_tibble(pos) %>%
     geom_point(col = "blue", size = 1) +
     labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
 
+nei.bc <- rownames(pos[is_inside$inside, ])
 as_tibble(pos) %>%
-  mutate(prop = deconProp[, topic.target]) %>%
+  mutate(bc = rownames(pos)) %>%
   ggplot(aes(x = x, y = y)) +
-    geom_point(aes(color = prop), size = 1, stroke = 0) +
-    scale_color_gradient2()
-```
-
-# LEMUR
-
-```{r}
-cont2ordered <- function(x, n, from = min(x), to = max(x), add_label = TRUE, label_fmt = "%.2f"){
-  groups <- seq(from, to, length.out = n+1)
-  res <- rep(NA_integer_, length(x))
-  labels <- rep(NA_character_, n)
-  for(idx in seq_len(n)){
-    if(idx == n){
-      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
-      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
-    }else{
-      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
-      res[x >= groups[idx] & x < groups[idx+1]] <- idx
-    }
-  }
-  if(add_label){
-    ordered(res, levels = seq_len(n), labels = labels)
-  }else{
-    res
-  }
-}
-
-cont2ordered(seq(0, 30), n = 6, label_fmt = "%.f")
-levels(cont2ordered(sce_subset$dist, n = 10, label_fmt = "%.2f"))
-```
-
-```{r}
-sce_subset$dist_cluster <- cont2ordered(sce_subset$dist, n = 10, label_fmt = "%.2f")
-```
-
-```{r}
-{r}
-as_tibble(colData(sce_subset)) %>%
-  mutate(umap = umap) %>%
-  ggplot(aes(x = umap[,1], y = umap[,2])) +
-    geom_point(aes(color = sample), size = 0.3, stroke = 0) +
-    guides(color = guide_legend(override.aes = list(size = 1)))
-
-as_tibble(colData(sce_subset)) %>%
-  mutate(umap = umap) %>%
-  ggplot(aes(x = umap[,1], y = umap[,2])) +
-    geom_point(aes(color = cell_type_lumped), size = 0.3, stroke = 0) +
-    guides(color = guide_legend(override.aes = list(size = 1)))
-
-as_tibble(colData(sce_subset)) %>%
-  mutate(umap = umap) %>%
-  ggplot(aes(x = umap[,1], y = umap[,2])) +
-    geom_point(aes(color = dist), size = 0.3, stroke = 0) +
-    scale_color_viridis_b()
-```
-
-```{r}
-set.seed(1)
-fit <- lemur::lemur(sce_subset, design = ~ dist_cluster, n_embedding = 30, test_fraction = 0.6)
-set.seed(1)
-fit <- lemur::align_harmony(fit)
-```
-
-```{r}
-{r}
-fit <- lemur::test_de(fit, cond(dist_cluster = "[0.90,1.00]") - cond(dist_cluster = "[0.00,0.10)"))
-set.seed(1)
-nei <- lemur::find_de_neighborhoods(fit, group_by = vars(dist_cluster, sample), test_method = "edgeR")
-```
-
-```{r}
-qs::qsave(sce_subset, "../data/cable_spatial_plaque_data/annotated_sce.qs")
-```
-
-```{r}
-fit_small <- fit["Jun",]
-nei_small <- nei %>% filter(name == "Jun")
-
-qs::qsave(fit_small, "../output/cable_spatial_plaque_data/fit_small.qs")
-qs::qsave(nei_small, "../output/cable_spatial_plaque_data/nei_small.qs")
-```
-
-# Misc
-
-```{r}
-# load counts and coords
-dir <-  '../data/SHK166_RA_Knee'
-
-path.pos <- paste(dir, 'spatial/tissue_positions.csv', sep = '/')
-pos.info <- read.csv(path.pos)
-
-## filt out out-tissue pixels
-# pos.info <- subset(pos.info, in_tissue == 1)
-pos.full <- pos.info[, c('pxl_row_in_fullres', 'pxl_col_in_fullres')]
-plot(pos, cex = 0.1)
-
-diff.plot <- function(dim){
-  pos.sorted <- pos.full[order(pos.full[,dim], decreasing = FALSE),]
-  plot(head(pos.sorted, n =100))
-  head(pos.sorted, n =40)
-  6922 - 6763
-  # table(pos.diff)
-  pos.diff <- pos.sorted[2:nrow(pos.sorted), dim] - pos.sorted[1:nrow(pos.sorted) -1 , dim]
-  barplot(table(pos.diff), main="Diff counts", xlab="Diff", ylab="Count", border="red", col="blue", density=10)
-}
-
-diff.plot(1)
-diff.plot(2)
-
-nrow <- nrow(pos.full)
-target <- pos.full[180,]
-dists <- c()
-for (i in seq_len(nrow)){
-  distance <- sum((target - pos.full[i,])^2)
-  dists <- c(dists, distance)
-}
-idxs <- order(dists)
-idxs <- idxs[1:7]
-plot(pos.full[idxs,])
-sort(dists)[1:10]
-
+    geom_point(size = 1, color = "grey") +
+    gghighlight(bc %in% nei.bc) +
+    geom_point(col = "black", size = 1) +
+    labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
 
 ```
 
-```{r}
-path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
-deconvolution_topic_features_k10 <- read.csv(path)
-head(deconvolution_topic_features_k10)
-colnames(deconvolution_topic_features_k10)
-
-path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
-deconvolved_spots_k10 <- read.csv(path)
-head(deconvolved_spots_k10)
-```
-
-```{r}
-# Sample data with duplicated column names
-counts <- matrix(1:12, nrow = 3, ncol = 4)
-colnames(counts) <- c("barcode1", "barcode2", "barcode2", "barcode3")
-
-# Print original column names
-print("Original column names:")
-print(colnames(counts))
-
-counts[, !duplicated(colnames(counts))]
-# Identify duplicate column names
-duplicate_colnames <- colnames(counts)[duplicated(colnames(counts))]
-print("Duplicate column names:")
-print(duplicate_colnames)
-# Rename duplicates to make them unique
-colnames(counts) <- make.unique(colnames(counts))
-
-# Print modified column names
-print("Modified column names:")
-print(colnames(counts))
-
-
-```
-
-# Reference
-
--   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
-
--   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>
+\
