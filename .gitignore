@@ -6,8 +6,10 @@ renv
 
 *.png
 *.pdf
-data/.
+**/data/
+data/
 **/results/
+results/
 
 core
 
