@@ -54,19 +54,20 @@ pos <- as.matrix(pos)
 # Deconvolution
 
 ```{r}
-prior.k <- 19
-
-```
-
-## STDeconvolve
-
-```{r}
 # select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
 res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
 if (!file.exists(res.path)) {
   source("../scripts/deconvolution/STDeconvolve.R")
 }
 ldas <- qs::qread(res.path)
+ldas$kneedOptK
+prior.k <- 7
+```
+
+## STDeconvolve
+
+```{r}
+
 
 # ldas$kneedOptK
 optLDA <- optimalModel(models = ldas, opt = prior.k)
@@ -93,27 +94,19 @@ get.marker.genes <-  function(i, n = 10, gexp = deconGexp) {
 
 ```{r}
 target.cell <- "PRG4+ Lining" 
-target.cell <- "Endothelial Cells"
 target.cell <- "MerTK+Macrophages" 
+target.cell <- "Endothelial Cells"
 ```
 
 ```{r}
 # load reference data set
-dir.cluster <- "~/data/"
-dir.local <- "../../Spatial/"
-ref.name <- "ref_from_merged_subpop_down_main_clusters_for_CCI.rds"
+dir.res <- get.res.dir()
+ref <- qread(file.path(dir.res, "SCE/sce.qs"))
 
-ref.dir <- dir.cluster
-if (!dir.exists(ref.dir)) {
-  ref.dir <- dir.local
-}
-
-ref <- readRDS(paste0(ref.dir, ref.name))
-
-ctypes <- ref@cell_types
+ctypes <- ref$cell.group.7
 which(unique(ctypes) == target.cell )
 
-ref.counts <- t(ref@counts) # ctype x gene
+ref.counts <- t(counts(ref)) # ctype x gene
 dim(ref.counts)
 
 genes.sel <- colnames(deconGexp)
@@ -135,11 +128,6 @@ ref.gexp <- ref.gexp[, -1]
 mode(ref.gexp) <- "numeric"
 
 ctypes.unique
-# CD1c+ DCs Macrophages
-# CD4+ Tcells CD4 CD8 -> T Cells
-# Sublining 
-# Lining
-
 ```
 
 ```{r}
@@ -158,7 +146,7 @@ rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
 correlationPlot2(mat = corMtx_beta,
                 colLabs = "Deconvolved cell-types",
                 rowLabs = "Ground truth cell-types",
-                title = "Transcriptional correlation", annotation = T, annotation_size = 2) +
+                title = "Transcriptional correlation", annotation = T, annotation_size = 4) +
   ## this function returns a `ggplot2` object, so can add additional aesthetics
 ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
                   axis.text.y = ggplot2::element_text(size = 8))
@@ -179,6 +167,32 @@ plot.stdeconv <- vizTopic(theta = deconProp, pos = pos, topic = matched.topic, p
 ```
 
 ## RCTD
+
+```{r}
+# res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
+dir <- get.res.dir()
+res.rctd <- qs::qread(file.path(dir, "deconvolution/RCTD/myRCTD.qs"))
+res.rctd <- res.rctd@results
+ctypes <- colnames(res.rctd$norm_weights)
+
+deconProp.rctd <- res.rctd$norm_weights %>% as.matrix()
+cell.idx.rctd <- which(colnames(deconProp.rctd) == target.cell )
+```
+
+```{r}
+# pos
+# deconProp
+# class(deconProp.rctd)
+# deconProp.rctd
+colnames(deconProp.rctd) <- seq_len(ncol(deconProp.rctd))
+plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = matched.topic, plotTitle = paste0("RCTD - ", target.cell),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+
+```
+
+## Cell2location
 
 ```{r}
 # res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
@@ -241,7 +255,6 @@ plot.rctd
 ```{r}
 image_path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/spatial/tissue_lowres_image.png"
 img <- load.image(image_path)
-img
 ```
 
 ### Agreement on marker genes

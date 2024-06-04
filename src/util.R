@@ -416,3 +416,66 @@ add_graphic <- function(filename, x = 0, y = 0, width = NULL, height = NULL,
   class(res) <- "tikz_graphic_fun"
   res
 }
+
+
+correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annotation = FALSE, annotation_size = 0.5 ){
+  
+  correlation_palette <- grDevices::colorRampPalette(c("blue", "white", "red"))(n = 209)
+  correlation_breaks <- c(seq(-1,-0.01,length=100),
+                          seq(-0.009,0.009,length=10),
+                          seq(0.01,1,length=100))
+  
+  dat <- reshape2::melt(mat)
+  plt <- ggplot2::ggplot(data = dat) +
+    ggplot2::geom_tile(ggplot2::aes(x = Var1, y = Var2, fill=value)) +
+    
+    ggplot2::scale_y_discrete(breaks = as.character(dat$Var2), labels = as.character(dat$Var2))
+  
+  ## if correlation values are to be plotted in squares:
+  if(annotation){
+    plt <- plt + ggplot2::geom_text(ggplot2::aes(x = as.character(Var1), y = as.character(Var2), label = format(round(value, 2), nsmall = 2)), size = annotation_size)
+  }
+  
+  plt <- plt + ggplot2::theme(axis.text.x = ggplot2::element_text(size=12, color = "black", hjust = 0, vjust = 0.5),
+                              axis.text.y = ggplot2::element_text(size=12, color = "black"),
+                              axis.title.y = ggplot2::element_text(size=13),
+                              axis.title.x = ggplot2::element_text(size=13),
+                              plot.title = ggplot2::element_text(size=15),
+                              legend.text = ggplot2::element_text(size = 15, colour = "black"),
+                              legend.title = ggplot2::element_text(size = 15, colour = "black", angle = 90),
+                              panel.background = ggplot2::element_blank(),
+                              ## border around plot
+                              panel.border = ggplot2::element_rect(fill = NA, color = "black", size = 2),
+                              plot.background = ggplot2::element_blank()
+                              # legend.position="none"
+  ) +
+    ## fix up colorbar legend
+    ggplot2::scale_fill_gradientn(limits = c(-1,1),
+                                  breaks = c(-1,0,1),
+                                  colors=(grDevices::colorRampPalette(c("blue","white","red")))(n = 209)
+    ) +
+    ggplot2::guides(fill = ggplot2::guide_colorbar(title = "Correlation",
+                                                   title.position = "left",
+                                                   title.hjust = 0.5,
+                                                   ticks.colour = "black",
+                                                   ticks.linewidth = 2,
+                                                   frame.colour= "black",
+                                                   frame.linewidth = 2,
+                                                   label.hjust = 0
+    )) +
+    
+    ggplot2::coord_fixed()
+  
+  if (!is.na(colLabs)){
+    plt <- plt + ggplot2::xlab(colLabs)
+  }
+  if (!is.na(rowLabs)){
+    plt <- plt + ggplot2::ylab(rowLabs)
+  }
+  if (!is.na(title)){
+    plt <- plt + ggplot2::ggtitle(title)
+  }
+  
+  return(plt)
+  
+}

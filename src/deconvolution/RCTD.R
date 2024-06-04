@@ -10,15 +10,18 @@ data_dir <- get.std.path()
 se <- load.data(data_dir)
 
 # load reference scRNA-seq
-ref_path <- get.refd.path()
-ref <- readRDS(ref_path)
-counts.sc <- ref@counts
-ctypes <- ref@cell_types
-colnames(counts.sc) <- ctypes
-ref@counts <- counts.sc
+# load reference data set
+dir.res <- get.res.dir()
+ref <- qread(file.path(dir.res, "SCE/sce.qs"))
+counts.sc <- counts(ref)
 
-file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
-write.csv(counts.sc, file = , row.names = TRUE)
+ctypes <- ref$cell.group.7
+nUMI <- colSums(counts.sc)
+names(nUMI) <- colnames(counts.sc) # create nUMI named list
+names(ctypes) <- colnames(counts.sc) # create nUMI named list
+ref <- Reference(counts.sc, ctypes, nUMI)
+# file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
+# write.csv(counts.sc, file = , row.names = TRUE)
 counts <- assay(se, "counts") # gene by barcode
 
 # Count occurrences of each column name

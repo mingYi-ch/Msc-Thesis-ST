@@ -1,11 +1,11 @@
 library(STdeconvolve)
 library(qs)
+
 source("./src/util.R")
+source("./config/config.R")
 
 # load data as spatialExperiment object
-# TODO config
-data_dir <- '/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee'
-data_dir <- './data/SHK166_RA_Knee'
+data_dir <- get.std.path()
 se <- load.data(data_dir)
 
 cd <- assay(se, "counts")
@@ -19,11 +19,12 @@ corpus <- restrictCorpus(counts,
                          removeBelow = 0.05, 
                          nTopOD = NA,
                          plot = FALSE,
-                         alpha = 0.05) # 1e-8
+                         alpha = 0.1) # 1e-8
 
-ldas <- fitLDA(t(as.matrix(corpus)), Ks = 8:20)
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = seq(4, 18))
 
-opt.K <- 10
+opt.K <- ldas$kneedOptK
+
 # select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
 optLDA <- optimalModel(models = ldas, opt = opt.K)
 results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)

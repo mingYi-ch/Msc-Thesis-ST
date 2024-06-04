@@ -7,9 +7,11 @@ renv
 *.png
 *.pdf
 data/.
-results/*
+**/results/
 
-*/renv
+core
+
+**/renv
 
 # History files
 .Rhistory
