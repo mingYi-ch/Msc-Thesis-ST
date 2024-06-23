@@ -6,9 +6,9 @@ source("./config/config.R")
 
 # load data as spatialExperiment object
 data_dir <- get.std.path()
-se <- load.data(data_dir)
+spe <- load.data(data_dir)
 
-cd <- assay(se, "counts")
+cd <- assay(spe, "counts")
 
 # QC: Filter out poor pixels and genes
 counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 10, verbose = TRUE)

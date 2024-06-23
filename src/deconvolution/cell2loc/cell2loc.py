@@ -19,7 +19,7 @@ gc.collect()
 # load data
 cellcount = "/home/myi/data/scRNA-seq/sc_counts_SHK166_RA_Knee.mtx"
 sp_data = "/home/myi/data/spatial-trancriptomics/st_counts_SHK166_RA_Knee.mtx"
-celltype = "/home/myi/data/scRNA-seq/ctypes_counts_SHK166_RA_Knee.csv"
+celltype = "/home/myi/data/scRNA-seq/ctypes7_counts_SHK166_RA_Knee.csv"
 
 start_time = time.time()
 adata_ref = sc.read_mtx(cellcount).transpose()
@@ -27,13 +27,16 @@ df_celltype = pd.read_csv(celltype, header=0, index_col=0)
 df_celltype.index = adata_ref.obs.index
 adata_ref.obs['Subset'] = df_celltype
 
+shuffled_obs_indices = np.random.permutation(adata_ref.n_obs)
+adata_ref = adata_ref[shuffled_obs_indices, :]
+
 # Get 'Method'
-adata_ref.obs['Method'] = '3GEX'
+# adata_ref.obs['Method'] = '3GEX'
 
 # Get 'Sample'
-adata_ref.obs['Sample'] = adata_ref.obs_names
-adata_ref.obs['Sample'] = adata_ref.obs['Sample'].apply(lambda x: x[0:4])
-
+# adata_ref.obs['Sample'] = adata_ref.obs_names
+# adata_ref.obs['Sample'] = adata_ref.obs['Sample'].apply(lambda x: x[0:4])
+N_cells_per_location = 7
 # QC
 from cell2location.utils.filtering import filter_genes
 selected = filter_genes(adata_ref, cell_count_cutoff=5, cell_percentage_cutoff2=0.03, nonz_mean_cutoff=1.12)
@@ -61,6 +64,9 @@ mod.train(max_epochs=250, batch_size=2500, train_size=1, lr=0.002, use_gpu=True)
 
 # plot ELBO loss history during training, removing first 20 epochs from the plot
 mod.plot_history(20)
+plt.savefig(f"./history.png",
+                bbox_inches='tight')
+plt.close()
 
 # In this section, we export the estimated cell abundance (summary of the posterior distribution).
 adata_ref = mod.export_posterior(
@@ -79,6 +85,9 @@ adata_ref.write(adata_file)
 # First plot: Reconstruction accuracy to assess if there are any issues with inference
 # Second plot: When this plot is very different from a diagonal plot (e.g. very low values on Y-axis, density everywhere) it indicates problems with signature estimation.
 mod.plot_QC()
+plt.savefig(f"./reconstruction_accuracy_histogram.png",
+                bbox_inches='tight')
+plt.close()
 
 # Export estimated expression in each cluster
 if 'means_per_cluster_mu_fg' in adata_ref.varm.keys():
@@ -111,14 +120,14 @@ mod = cell2location.models.Cell2location(
     adata_vis, cell_state_df=inf_aver,
     # the expected average cell abundance: tissue-dependent
     # hyper-prior which can be estimated from paired histology:
-    N_cells_per_location=19,
+    N_cells_per_location=N_cells_per_location,
     # hyperparameter controlling normalisation of
     # within-experiment variation in RNA detection:
-    detection_alpha=20
+    detection_alpha=2
 )
 mod.view_anndata_setup()
 
-mod.train(max_epochs=30000,
+mod.train(max_epochs=10000,
           # train using full data (batch_size=None)
           batch_size=None,
           # use all data points in training because
@@ -136,7 +145,13 @@ adata_vis = mod.export_posterior(
     adata_vis, sample_kwargs={'num_samples': 1000, 'batch_size': mod.adata.n_obs, 'use_gpu': True}
 )
 
+mod.plot_QC()
+plt.savefig(f"./posterior.png",
+                bbox_inches='tight')
+plt.close()
+
 # Save model
+run_name = "cell2loc"
 mod.save(f"{run_name}", overwrite=True)
 
 # mod = cell2location.models.Cell2location.load(f"{run_name}", adata_vis)

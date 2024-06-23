@@ -14,7 +14,6 @@ library(ggplot2)
 library(gghighlight)
 library(tidyverse)
 
-
 library(STdeconvolve)
 library(SpatialExperiment)
 library(lemur)
@@ -22,10 +21,7 @@ library(igraph)
 library(qs)
 
 library(dplyr)
-library(spacexr)
-# library(purrr)
-
-
+# library(spacexr)
 ```
 
 ```{r}
@@ -51,8 +47,8 @@ biopsy_dirs <- get.dirs(data_dir)
 
 ```{r}
 dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
-se <- load.data(dir)
-se
+spe <- load.data(dir)
+spe
 ```
 
 # Define covariate
@@ -60,23 +56,13 @@ se
 ## Proximity to a specific cell type
 
 ```{r}
-pos <- spatialCoords(se)
+pos <- spatialCoords(spe)
 pos <- pos[, c('x','y')]
 pos <- as.matrix(pos)
 
-prior.k <-  19
-# get deconProp
-# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
-res.path <- "../results/deconvolution/STDeconvolve/ldas.qs"
-if (!file.exists(res.path)) {
-  source("../scripts/deconvolution/STDeconvolve.R")
-}
-ldas <- qs::qread(res.path)
-
-# ldas$kneedOptK
-optLDA <- optimalModel(models = ldas, opt = prior.k)
-results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
-deconProp <- results$theta
+res.dir <- get.res.dir()
+res.dir
+deconProp <- qread("/data/myi/mt-spatial-transcriptomics/results/deconvolution/ deconProp_best.qs")
 ```
 
 ```{r}
@@ -125,7 +111,7 @@ weights <- deconProp_target
 weights <- rep(1, length(deconProp_target))
 min.dists <- get.min.dists(dists.mat, weights)
 
-se$min.dists <- min.dists
+spe$min.dists <- min.dists
 
 ```
 
@@ -195,16 +181,16 @@ bin.dists2 <- function(x, add_label = TRUE, label_fmt = "%.3f"){
 ```
 
 ```{r}
-se$dist.cluster <- bin.dists2(se$min.dists, label_fmt = "%.3f")
-table(se$dist.cluster)
+spe$dist.cluster <- bin.dists2(spe$min.dists, label_fmt = "%.3f")
+table(spe$dist.cluster)
  
 ```
 
 ```{r}
 set.seed(1)
-logcounts(se) <- transformGamPoi::shifted_log_transform(se)
-umap <- scater::calculateUMAP(se)
-reducedDim(se, withDimnames = FALSE) <- umap
+logcounts(spe) <- transformGamPoi::shifted_log_transform(spe)
+umap <- scater::calculateUMAP(spe)
+reducedDim(spe, withDimnames = FALSE) <- umap
 
 ```
 
@@ -213,22 +199,22 @@ set.seed(1)
 # Remove inf
 finite.mask <- is.finite(min.dists)
 min.dists.finite <- min.dists[finite.mask]
-se.finite <- se[, finite.mask]
-se.finite$dist.cluster <- droplevels(se.finite$dist.cluster)
-table(se.finite$dist.cluster)
+spe.finite <- spe[, finite.mask]
+spe.finite$dist.cluster <- droplevels(spe.finite$dist.cluster)
+table(spe.finite$dist.cluster)
 
 # subset genes
-# se.finite <- se.finite[1:100, ]
-dim(se.finite)
-fit <- lemur::lemur(se.finite, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
+# spe.finite <- spe.finite[1:100, ]
+dim(spe.finite)
+fit <- lemur::lemur(spe.finite, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
 set.seed(1)
 fit <- lemur::align_harmony(fit)
 ```
 
 ```{r}
-table(se.finite$dist.cluster)
+table(spe.finite$dist.cluster)
 
-bin.levels <- levels(se.finite$dist.cluster)
+bin.levels <- levels(spe.finite$dist.cluster)
 fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[length(bin.levels)]) - cond(dist.cluster = bin.levels[1]))
 set.seed(1)
 DE <- assay(fit, "DE")
@@ -243,7 +229,7 @@ if (!dir.exists(res.dir)) {
   dir.create(res.dir)
 }
 
-qs::qsave(se, file.path(res.dir, "se_dist.qs"))
+qs::qsave(spe, file.path(res.dir, "se_dist.qs"))
 ```
 
 ```{r}
@@ -288,7 +274,7 @@ as_tibble(pos) %>%
     geom_point(aes(color = dists), size = 1, stroke = 0) +
     scale_color_gradient2()
 ## umap
-as_tibble(colData(se)) %>%
+as_tibble(colData(spe)) %>%
   mutate(umap = umap) %>%
   ggplot(aes(x = umap[,1], y = umap[,2])) +
     geom_point(aes(color = min.dists), size = 0.3, stroke = 0) +

@@ -7,9 +7,8 @@ source("./config/config.R")
 
 # load data as spatialExperiment object
 data_dir <- get.std.path()
-se <- load.data(data_dir)
+spe <- load.data(data_dir)
 
-# load reference scRNA-seq
 # load reference data set
 dir.res <- get.res.dir()
 ref <- qread(file.path(dir.res, "SCE/sce.qs"))
@@ -22,7 +21,7 @@ names(ctypes) <- colnames(counts.sc) # create nUMI named list
 ref <- Reference(counts.sc, ctypes, nUMI)
 # file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
 # write.csv(counts.sc, file = , row.names = TRUE)
-counts <- assay(se, "counts") # gene by barcode
+counts <- assay(spe, "counts") # gene by barcode
 
 # Count occurrences of each column name
 colname_counts <- table(rownames(counts))
@@ -31,7 +30,7 @@ colname_counts <- table(rownames(counts))
 duplicate_counts <- colname_counts[colname_counts > 1]
 counts <- counts[!duplicated(rownames(counts)), ] # duplicates "TBCE"   "HSPA14"
 
-coords <- spatialCoords(se)
+coords <- spatialCoords(spe)
 nUMI <- colSums(counts) # In this case, total counts per pixel is nUMI
 
 coords_df <- as.data.frame(coords)

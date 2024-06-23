@@ -136,7 +136,7 @@ expr_comparison_pl <- comparison_data %>%
   mutate(plaque_cluster = ordered(plaque_cluster, levels = levels(fit$colData$plaque_cluster))) %>% 
   ggplot(aes(x = plaque_cluster, y = expr)) +
     geom_point(aes(color = origin), size = 0.3) +
-    geom_smooth(aes(color = origin, x = as.integer(plaque_cluster)), span = 1.5, se = FALSE, linewidth = 2) +
+    geom_smooth(aes(color = origin, x = as.integer(plaque_cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
     scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "Cells in neighborhood", "outside" = "All other cells")) +
     scale_y_continuous(limits = c(0, 0.3), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +

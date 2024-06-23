@@ -4,7 +4,7 @@ if (dir.exists("/home/myi")) {
   host <- "cluster"
 }
 proj.dir.local <- "/Users/Yi/Library/Mobile\ Documents/com~apple~CloudDocs/Master-thesis/Msc-Thesis-ST"
-proj.dir.cluster <- "/home/myi/mt-spatial-transcriptomics/"
+proj.dir.cluster <- "/data/myi/mt-spatial-transcriptomics"
 
 # define spatial transcriptomic data paths
 get.std.path <- function() {
@@ -31,6 +31,15 @@ get.res.dir <- function() {
   path <- file.path(proj.dir.cluster, "results")
   if (host == "local") {
     path <- file.path(proj.dir.local, "results")
+  }
+  return(path)
+}
+
+# data dir
+get.data.dir <- function() {
+  path <- file.path(proj.dir.cluster, "data")
+  if (host == "local") {
+    path <- file.path(proj.dir.local, "data")
   }
   return(path)
 }

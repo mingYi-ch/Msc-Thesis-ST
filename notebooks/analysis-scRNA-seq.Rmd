@@ -197,11 +197,53 @@ plots.grid
 ```
 
 ```{r}
-as_tibble(colData(sce)) %>%
-  mutate(umap = umap) %>%
-  ggplot(aes(x = umap[,1], y = umap[,2])) +
-    geom_point(aes(color = cell.group.4), size = 0.5) +
-    labs(title = "UMAP of samples")
+unique.cg <- unique(sce$cell.group.4)
+hl.type <- unique.cg[1]
+plot.cg <- function(hl.type) {
+   
+    color.group <- rep("grey", 4)
+    names(color.group) <- unique.cg
+    color.group[[hl.type]] <- "blue"
+    
+    plot <- as_tibble(colData(sce)) %>%
+      mutate(umap = umap) %>%
+      ggplot(aes(x = umap[,1], y = umap[,2])) +
+        geom_point(aes(color = cell.group.4), size = 0.5) +
+        scale_colour_manual(values = color.group) +
+        labs(title = "UMAP of cell.group.4")
+}
+
+plots <- lapply(unique.cg, plot.cg)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 2, rel_heights = 20)
+
+ggsave(filename = "UMAP of cell.group.4.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
+```
+
+```{r}
+unique.cg <- unique(sce$cell.group.7)
+hl.type <- unique.cg[1]
+plot.cg <- function(hl.type) {
+   
+    color.group <- rep("grey", 7)
+    names(color.group) <- unique.cg
+    color.group[[hl.type]] <- "blue"
+    
+    plot <- as_tibble(colData(sce)) %>%
+      mutate(umap = umap) %>%
+      ggplot(aes(x = umap[,1], y = umap[,2])) +
+        geom_point(aes(color = cell.group.7), size = 0.5) +
+        scale_colour_manual(values = color.group) +
+        labs(title = "UMAP of cell.group.7")
+}
+
+plots <- lapply(unique.cg, plot.cg)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 3, rel_heights = 20)
+
+ggsave(filename = "UMAP of cell.group.7.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
 ```
 
 ```{r}

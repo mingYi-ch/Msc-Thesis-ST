@@ -15,6 +15,12 @@ core
 
 **/renv
 
+*.tsv
+*.csv
+
+*.mtx
+*.h5ad
+
 # History files
 .Rhistory
 .Rapp.history

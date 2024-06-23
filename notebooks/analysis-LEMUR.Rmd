@@ -6,16 +6,17 @@ title: "R Notebook"
 
 ```{r}
 library(tidyverse)
-library(glue)
+# library(glue)
 library(SingleCellExperiment)
 library(lemur)
-
+library(SpatialExperiment)
 library(gghighlight)
 
 ```
 
 ```{r}
 source("../src/util.R")
+source("../config/config.R")
 ```
 
 # Load data
@@ -24,14 +25,226 @@ source("../src/util.R")
 res.dir <- file.path(get.res.dir(), "LEMUR")
 fit <- qs::qread(file.path(res.dir, "fit_small.qs"))
 nei <- qs::qread(file.path(res.dir, "nei_small.qs"))
+spe <- qs::qread(file.path(res.dir, "se_dist.qs"))
+
+
+topic.target <- 6
+method <- "STDeonv"
+deconProp <- deconProp.stdeconv # to be decided
+pos.target.mask <- deconProp[ , topic.target] > 0.4
+
+topic.target <- 2
+method <- "RCTD"
+deconProp <- deconProp.rctd # to be decided
+gcnt <- counts(spe)[gene_of_interest,]
+pos.target.mask <- deconProp[ , topic.target] > 0
+
 ```
 
 # Analysis
 
-## Dist without Lemur
+```{r}
+gene_of_interest <- nei$name[1] # NOC2L
+gene_of_interest <- nei$name[3] # CD19
+gene_of_interest <- nei$name[2] # THY1
+gene_of_interest
+```
+
+## Viz gene counts
 
 ```{r}
+colors.dict <- list("grey", "blue")
+names(colors.dict) <- c("others", "targets")
+groups <- rep("others", ncol(spe))
+groups[pos.target.mask] <- "targets"
 
+as_tibble(spatialCoords(spe)) %>%
+  mutate(bc = rownames(pos), gcnt = gcnt, groups = groups) %>%
+  ggplot(aes(x = x, y = y, color = groups)) +
+    geom_point(size = 1) +
+    scale_color_manual(values = colors.dict) +
+    labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
+```
+
+```{r}
+strokes <-  ifelse(groups == "targets", 0.5, 0)
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt, groups = groups, strokes = strokes) %>%
+    ggplot(aes(x = x, y = y, shape = groups, fill = gcnt)) +
+    geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+      scale_shape_manual(values = c(21, 24)) +  # different shapes for each group
+      scale_fill_gradient(low = "white", high = "red") +
+    labs(title = paste0(gene_of_interest, " vs ", "Endothelial Cells predicted by ", method), 
+         x = "pxl_row_in_fullres", 
+         y = "pxl_col_in_fullres",
+         fill = "Gexp Level") +
+    theme(
+    panel.grid.major = element_blank(), # Remove major grid lines
+    panel.grid.minor = element_blank()  # Remove minor grid lines
+  )
+
+dir <- get.res.dir()
+filename <-  paste0(method, " - dist of ", gene_of_interest, ".pdf")
+
+ggsave(filename = file.path(dir, "plots", filename), plot = plots, device = "pdf", width = 8, height = 6)
+
+```
+
+## Dist plot of all pixels
+
+```{r}
+expr <-  counts(spe)[gene_of_interest,]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+table(expr)
+
+expr_comparison_scatter <- as_tibble(colData(spe)) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
+  mutate(expr = expr) %>%
+  filter(!is.null(expr)) %>% 
+  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
+    geom_violin(trim = FALSE) +
+    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
+```
+
+```{r}
+expr <-  counts(spe)[gene_of_interest,]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+table(expr)
+
+expr_comparison_scatter <- as_tibble(colData(spe)) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
+  mutate(expr = expr) %>%
+  filter(!is.null(expr)) %>% 
+  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
+    geom_boxplot(alpha = 0.3) + # Add boxplots for reference
+    stat_summary(
+      fun = median, 
+      geom = "point", 
+      shape = 23, 
+      size = 4, 
+      fill = "red", 
+      color = "black"
+    ) + 
+    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
+```
+
+```{r}
+expr <-  counts(spe)[gene_of_interest,]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+table(expr)
+
+expr_comparison_scatter <- as_tibble(colData(spe)) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
+  mutate(expr = expr) %>%
+  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
+    geom_boxplot(alpha = 0.3) + # Add boxplots for reference
+    stat_summary(
+      fun = mean, 
+      geom = "point", 
+      shape = 23, 
+      size = 2.5, 
+      fill = "red", 
+      color = "black"
+    ) + 
+    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
+```
+
+```{r}
+expr <-  counts(spe)[gene_of_interest,]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+table(expr)
+
+expr_comparison_scatter <- as_tibble(colData(spe)) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
+  mutate(expr = expr) %>%
+  filter(!is.null(expr)) %>% 
+  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
+    geom_boxplot(alpha = 0.3) + # Add boxplots for reference
+    stat_summary(
+      fun = function(x) quantile(x, probs = 0.75), 
+      geom = "point", 
+      shape = 23, 
+      size = 3, 
+      fill = "red", 
+      color = "black"
+    ) + 
+    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
+```
+
+```{r}
+expr <-  counts(spe)[gene_of_interest,]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+table(expr)
+
+expr_comparison_scatter <- as_tibble(colData(spe)) %>%
+  mutate(expr = expr) %>%
+  ggplot(aes(x = min.dists, y = expr)) +
+    geom_point(size = 1) +
+    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
+```
+
+```{r}
+nei.bc <- rownames(pos[is_inside$inside, ])
+
+expr <-  logcounts(spe)[gene_of_interest,nei.bc]
+expr <- as.data.frame(expr)
+expr <- as.numeric(unlist(expr))
+
+expr_comparison_scatter <- as_tibble(colData(spe[,nei.bc])) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
+  mutate(expr = expr) %>%
+  mutate(bc = rownames(spe$min.dists)) %>%
+  ggplot(aes(x = dist.cluster, y = expr)) +
+    geom_point(size = 1) +
+   geom_smooth(aes(color = 'blue', x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
+    scale_y_continuous(limits = c(0, 5), expand = expansion(add = 0)) +
+    guides(x = guide_axis(angle = 45)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Expression",
+         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
+    theme(plot.subtitle = element_text(size = 7))
+
+expr_comparison_scatter
 ```
 
 ## Dist Clusters in UMAP
@@ -49,28 +262,21 @@ as_tibble(colData(fit)) %>%
     guides(color = guide_legend(override.aes = list(size = 1)))
 ```
 
-```{r}
-genes_of_interest <- nei$name[1] # NOC2L
-genes_of_interest <- nei$name[3]
-genes_of_interest <- nei$name[2]
-genes_of_interest
-```
-
 ## Correlation plot
 
 ```{r, paged.print=FALSE}
 
-mask <- matrix(NA, nrow = length(genes_of_interest), ncol = ncol(fit), 
-               dimnames = list(genes_of_interest, colnames(fit)))
-mask2 <- matrix(1, nrow = length(genes_of_interest), ncol = ncol(fit), 
-               dimnames = list(genes_of_interest, colnames(fit)))
-for(id in genes_of_interest){
+mask <- matrix(NA, nrow = length(gene_of_interest), ncol = ncol(fit), 
+               dimnames = list(gene_of_interest, colnames(fit)))
+mask2 <- matrix(1, nrow = length(gene_of_interest), ncol = ncol(fit), 
+               dimnames = list(gene_of_interest, colnames(fit)))
+for(id in gene_of_interest){
   mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
   mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
 }
 
-psce2 <- glmGamPoi::pseudobulk(SingleCellExperiment(list(inside = as.matrix(logcounts(fit)[genes_of_interest,,drop=FALSE] * mask),
-                                                        outside = as.matrix(logcounts(fit)[genes_of_interest,,drop=FALSE] * mask2))),
+psce2 <- glmGamPoi::pseudobulk(SingleCellExperiment(list(inside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask),
+                                                        outside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask2))),
                       group_by = vars(sample_id, dist.cluster), n = n(),
                       aggregation_functions = list(.default = \(...) matrixStats::rowMeans2(..., na.rm = TRUE)),
                       col_data = as.data.frame(colData(fit)))
@@ -89,13 +295,13 @@ expr_comparison_pl <- comparison_data %>%
   mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
   ggplot(aes(x = dist.cluster, y = expr)) +
     geom_point(aes(color = origin), size = 1) +
-    geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, se = FALSE, linewidth = 2) +
+    geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
     scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
     scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
     labs(color = "", y = "Expression(log transformed)",
-         subtitle = paste0(genes_of_interest, " expr. vs. Dist to endothelial cell"))  +
+         subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell"))  +
     theme(plot.subtitle = element_text(size = 7))
 
 expr_comparison_pl
@@ -106,20 +312,20 @@ expr_comparison_scatter <- comparison_data %>%
   mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
   ggplot(aes(x = dist.cluster, y = expr)) +
     geom_point(aes(color = origin), size = 1) +
-    # geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, se = FALSE, linewidth = 2) +
+    # geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
     scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
     scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
     labs(color = "", y = "Expression",
-         subtitle = paste0(genes_of_interest, " expr. vs. Dist to endothelial cell"))  +
+         subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell"))  +
     theme(plot.subtitle = element_text(size = 7))
 
 expr_comparison_scatter
 ```
 
 ```{r, paged.print=FALSE}
-is_inside <- tibble(symbol = genes_of_interest, cell_id = list(colnames(fit))) %>%
+is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
   left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
   mutate(inside = map2(cell_id, neighborhood, \(ref, nei_pixels) ref %in% nei_pixels)) %>%
   dplyr::select(-neighborhood) %>%
@@ -127,7 +333,7 @@ is_inside <- tibble(symbol = genes_of_interest, cell_id = list(colnames(fit))) %
 
 de_plot_data <- as_tibble(colData(fit), rownames = "cell_id") %>%
   mutate(umap = umap) %>%
-  mutate(de = as_tibble(t(assay(fit[genes_of_interest,], "DE")))) %>%
+  mutate(de = as_tibble(t(assay(fit[gene_of_interest,], "DE")))) %>%
   unnest(de, names_sep = "-") %>%
   pivot_longer(starts_with("de-"), names_sep = "-", values_to = "de", names_to = c(NA, "symbol")) %>%
   inner_join(is_inside, by = c("symbol", "cell_id")) %>%
@@ -171,6 +377,8 @@ rel_plt <- colData(fit) %>%
  expr_comparison_scatter / rel_plt 
 ```
 
+## Gene counts
+
 ```{r}
 as_tibble(pos) %>%
   mutate(bc = rownames(pos)) %>%
@@ -191,4 +399,38 @@ as_tibble(pos) %>%
 
 ```
 
-\
+## Misc.
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Example data
+set.seed(123)
+group1 <- data.frame(x = rnorm(50, mean = 0), y = rnorm(50, mean = 0), group = 'A')
+group2 <- data.frame(x = rnorm(50, mean = 3), y = rnorm(50, mean = 3), group = 'B')
+
+# Combine the data
+data <- rbind(group1, group2)
+
+# Scale color values within each group
+data <- data %>%
+  group_by(group) %>%
+  mutate(color_value = scales::rescale(x))
+
+print(data)
+
+# Plotting
+p <- ggplot(data, aes(x = x, y = y, color = color_value)) +
+  geom_point(size = 3) +
+  scale_color_gradientn(colors = c("blue", "green", "red")) +
+  facet_wrap(~ group) +
+  labs(title = "Scatter Plot of Two Groups with Scaled Colors",
+       x = "X-axis",
+       y = "Y-axis",
+       color = "Scaled X") +
+  theme_minimal()
+
+print(p)
+
+```

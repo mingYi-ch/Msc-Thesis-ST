@@ -25,16 +25,16 @@ load.data  <- function(dir) {
   dim(features)
   rownames(gexp) <- make.unique(features$V2) # TODO: check with Prof. if right
   
-  # build se object
+  # build spe object
   pos <- as.matrix(pos)
   ## "pxl_col_in_fullres" = "y" coordinates, and "pxl_row_in_fullres" = "x" coordinates
   colnames(pos) <- c("x", "y")
   
-  se <- SpatialExperiment(assay = gexp, spatialCoords = pos)
+  spe <- SpatialExperiment(assay = gexp, spatialCoords = pos)
   
-  assayNames(se) <- 'counts'
+  assayNames(spe) <- 'counts'
   
-  return(se)
+  return(spe)
 }
 
 
@@ -418,7 +418,7 @@ add_graphic <- function(filename, x = 0, y = 0, width = NULL, height = NULL,
 }
 
 
-correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annotation = FALSE, annotation_size = 0.5 ){
+correlationPlot2 <- function(mat, colTicks = NA, colLabs = NA, rowLabs = NA, title = NA, annotation = FALSE, annotation_size = 0.5 ){
   
   correlation_palette <- grDevices::colorRampPalette(c("blue", "white", "red"))(n = 209)
   correlation_breaks <- c(seq(-1,-0.01,length=100),
@@ -464,7 +464,9 @@ correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annota
                                                    label.hjust = 0
     )) +
     
-    ggplot2::coord_fixed()
+    scale_y_discrete(labels = colTicks) +
+    
+    ggplot2::coord_fixed() 
   
   if (!is.na(colLabs)){
     plt <- plt + ggplot2::xlab(colLabs)
@@ -477,5 +479,104 @@ correlationPlot2 <- function(mat, colLabs = NA, rowLabs = NA, title = NA, annota
   }
   
   return(plt)
+  
+}
+
+vizTopic2 <- function(theta, pos, topic,
+                      groups = NA,
+                      group_cols = NA,
+                      size = 2,
+                      stroke = 0.3,
+                      alpha = 1,
+                      low = "white",
+                      high = "red",
+                      plotTitle = NA,
+                      showLegend = TRUE) {
+  
+  ## check that theta and pos are either data.frames or matrices
+  if( !is.matrix(theta) & !is.data.frame(theta) == FALSE ){
+    stop("`theta` must be a matrix or data.frame.")
+  }
+  if( !is.matrix(pos) == FALSE & !is.data.frame(pos) == FALSE ){
+    stop("`pos` must be a matrix or data.frame with exactly 2 columns named `x` and `y`.")
+  }
+  
+  if( (any(!colnames(pos) %in% c("x", "y")) == TRUE) | (dim(pos)[2] != 2) ){
+    stop("`pos` must have exactly 2 columns named `x` and `y`.")
+  }
+  
+  # ensure that `theta` and `pos` pixel rownames maintain same order
+  # after the merge so as to not mess up the order of `groups`
+  # if provided
+  # make sure only using the shared pixels
+  pixels <- intersect(rownames(theta), rownames(pos))
+  pixels <- rownames(theta)[which(rownames(theta) %in% pixels)]
+  
+  proportion <- theta[,topic]
+  dat <- merge(data.frame(proportion),
+               data.frame(pos), by=0)
+  
+  rownames(dat) <- dat[,"Row.names"]
+  ## make sure pixels in the original order before the merge
+  dat <- dat[pixels,]
+  
+  # color spots by group:
+  if (is.na(groups[1])) {
+    Groups <- " "
+  } else {
+    Groups <- as.character(groups)
+  }
+  if (is.na(group_cols[1])) {
+    group_cols <- c(" " = "black")
+  }
+  
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_point(data = dat, ggplot2::aes(x=x, y=y, fill=proportion, color = Groups),
+                        shape = 21,
+                        stroke = stroke, size = size, 
+                        alpha = alpha) +
+    ggplot2::scale_color_manual(values = group_cols)
+  
+  p <- p +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.line = ggplot2::element_blank(),
+      axis.text.x = ggplot2::element_blank(),
+      axis.text.y = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      axis.title.x = ggplot2::element_blank(),
+      axis.title.y = ggplot2::element_blank(),
+      panel.background = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 8, colour = "black"),
+      legend.title = ggplot2::element_text(size = 9, colour = "black")
+    ) +
+    
+    ggplot2::scale_fill_gradientn(limits = c(0, 1.0),
+                                  breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                                  colors=(grDevices::colorRampPalette(c(low, high)))(n = 209)
+    ) +
+    
+    ggplot2::guides(color = "none", fill = ggplot2::guide_colorbar(title = "Propotions",
+                                                                   title.position = "left",
+                                                                   title.hjust = 0.5,
+                                                                   ticks.colour = "black",
+                                                                   ticks.linewidth = 2,
+                                                                   frame.colour= "black",
+                                                                   frame.linewidth = 1.5,
+                                                                   label.hjust = 0,
+                                                                   title.theme = ggplot2::element_text(angle = 90)
+    ))
+  
+  if (!showLegend) {
+    p <- p + ggplot2::theme(legend.position = "none")
+  }
+  
+  if (!is.na(plotTitle)) {
+    p <- p + ggplot2::ggtitle(plotTitle)
+  }
+  
+  p <- p + ggplot2::coord_equal()
+  
+  return(p)
   
 }
