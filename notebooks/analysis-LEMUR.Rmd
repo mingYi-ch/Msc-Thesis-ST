@@ -6,11 +6,11 @@ title: "R Notebook"
 
 ```{r}
 library(tidyverse)
-# library(glue)
 library(SingleCellExperiment)
 library(lemur)
 library(SpatialExperiment)
 library(gghighlight)
+library(patchwork)
 
 ```
 
@@ -27,67 +27,14 @@ fit <- qs::qread(file.path(res.dir, "fit_small.qs"))
 nei <- qs::qread(file.path(res.dir, "nei_small.qs"))
 spe <- qs::qread(file.path(res.dir, "se_dist.qs"))
 
-
-topic.target <- 6
-method <- "STDeonv"
-deconProp <- deconProp.stdeconv # to be decided
-pos.target.mask <- deconProp[ , topic.target] > 0.4
-
-topic.target <- 2
-method <- "RCTD"
-deconProp <- deconProp.rctd # to be decided
-gcnt <- counts(spe)[gene_of_interest,]
-pos.target.mask <- deconProp[ , topic.target] > 0
-
 ```
 
 # Analysis
 
 ```{r}
 gene_of_interest <- nei$name[1] # NOC2L
-gene_of_interest <- nei$name[3] # CD19
 gene_of_interest <- nei$name[2] # THY1
 gene_of_interest
-```
-
-## Viz gene counts
-
-```{r}
-colors.dict <- list("grey", "blue")
-names(colors.dict) <- c("others", "targets")
-groups <- rep("others", ncol(spe))
-groups[pos.target.mask] <- "targets"
-
-as_tibble(spatialCoords(spe)) %>%
-  mutate(bc = rownames(pos), gcnt = gcnt, groups = groups) %>%
-  ggplot(aes(x = x, y = y, color = groups)) +
-    geom_point(size = 1) +
-    scale_color_manual(values = colors.dict) +
-    labs(title = paste0("Topic - ", topic.target), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres")
-```
-
-```{r}
-strokes <-  ifelse(groups == "targets", 0.5, 0)
-plots <- as_tibble(spatialCoords(spe)) %>%
-  mutate(gcnt = gcnt, groups = groups, strokes = strokes) %>%
-    ggplot(aes(x = x, y = y, shape = groups, fill = gcnt)) +
-    geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
-      scale_shape_manual(values = c(21, 24)) +  # different shapes for each group
-      scale_fill_gradient(low = "white", high = "red") +
-    labs(title = paste0(gene_of_interest, " vs ", "Endothelial Cells predicted by ", method), 
-         x = "pxl_row_in_fullres", 
-         y = "pxl_col_in_fullres",
-         fill = "Gexp Level") +
-    theme(
-    panel.grid.major = element_blank(), # Remove major grid lines
-    panel.grid.minor = element_blank()  # Remove minor grid lines
-  )
-
-dir <- get.res.dir()
-filename <-  paste0(method, " - dist of ", gene_of_interest, ".pdf")
-
-ggsave(filename = file.path(dir, "plots", filename), plot = plots, device = "pdf", width = 8, height = 6)
-
 ```
 
 ## Dist plot of all pixels
@@ -104,7 +51,7 @@ expr_comparison_scatter <- as_tibble(colData(spe)) %>%
   filter(!is.null(expr)) %>% 
   ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
     geom_violin(trim = FALSE) +
-    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
+    scale_y_continuous(limits = c(0, 15), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
     labs(color = "", y = "Expression",
@@ -115,62 +62,9 @@ expr_comparison_scatter
 ```
 
 ```{r}
-expr <-  counts(spe)[gene_of_interest,]
-expr <- as.data.frame(expr)
-expr <- as.numeric(unlist(expr))
-table(expr)
-
-expr_comparison_scatter <- as_tibble(colData(spe)) %>%
-  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
-  mutate(expr = expr) %>%
-  filter(!is.null(expr)) %>% 
-  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
-    geom_boxplot(alpha = 0.3) + # Add boxplots for reference
-    stat_summary(
-      fun = median, 
-      geom = "point", 
-      shape = 23, 
-      size = 4, 
-      fill = "red", 
-      color = "black"
-    ) + 
-    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
-    guides(x = guide_axis(angle = 45)) +
-    theme(axis.title.x = element_blank(), legend.position = "bottom") +
-    labs(color = "", y = "Expression",
-         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
-    theme(plot.subtitle = element_text(size = 7))
-
-expr_comparison_scatter
-```
-
-```{r}
-expr <-  counts(spe)[gene_of_interest,]
-expr <- as.data.frame(expr)
-expr <- as.numeric(unlist(expr))
-table(expr)
-
-expr_comparison_scatter <- as_tibble(colData(spe)) %>%
-  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
-  mutate(expr = expr) %>%
-  ggplot(aes(x = dist.cluster, y = expr, fill = dist.cluster)) +
-    geom_boxplot(alpha = 0.3) + # Add boxplots for reference
-    stat_summary(
-      fun = mean, 
-      geom = "point", 
-      shape = 23, 
-      size = 2.5, 
-      fill = "red", 
-      color = "black"
-    ) + 
-    scale_y_continuous(limits = c(0, 20), expand = expansion(add = 0)) +
-    guides(x = guide_axis(angle = 45)) +
-    theme(axis.title.x = element_blank(), legend.position = "bottom") +
-    labs(color = "", y = "Expression",
-         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
-    theme(plot.subtitle = element_text(size = 7))
-
-expr_comparison_scatter
+res.dir <- get.res.dir()
+filename <- paste0("Violin plot of dists",  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_scatter, device = "png", width = 10, height = 8, dpi = 500)
 ```
 
 ```{r}
@@ -223,30 +117,6 @@ expr_comparison_scatter <- as_tibble(colData(spe)) %>%
 expr_comparison_scatter
 ```
 
-```{r}
-nei.bc <- rownames(pos[is_inside$inside, ])
-
-expr <-  logcounts(spe)[gene_of_interest,nei.bc]
-expr <- as.data.frame(expr)
-expr <- as.numeric(unlist(expr))
-
-expr_comparison_scatter <- as_tibble(colData(spe[,nei.bc])) %>%
-  mutate(dist.cluster = ordered(dist.cluster, levels = levels(spe$dist.cluster))) %>%
-  mutate(expr = expr) %>%
-  mutate(bc = rownames(spe$min.dists)) %>%
-  ggplot(aes(x = dist.cluster, y = expr)) +
-    geom_point(size = 1) +
-   geom_smooth(aes(color = 'blue', x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
-    scale_y_continuous(limits = c(0, 5), expand = expansion(add = 0)) +
-    guides(x = guide_axis(angle = 45)) +
-    theme(axis.title.x = element_blank(), legend.position = "bottom") +
-    labs(color = "", y = "Expression",
-         subtitle = paste0("All pixels - ", " expr. vs. Dist to endothelial cell"))  +
-    theme(plot.subtitle = element_text(size = 7))
-
-expr_comparison_scatter
-```
-
 ## Dist Clusters in UMAP
 
 ```{r}
@@ -264,6 +134,8 @@ as_tibble(colData(fit)) %>%
 
 ## Correlation plot
 
+### Norm case
+
 ```{r, paged.print=FALSE}
 
 mask <- matrix(NA, nrow = length(gene_of_interest), ncol = ncol(fit), 
@@ -275,6 +147,7 @@ for(id in gene_of_interest){
   mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
 }
 
+# calculate mean inside and outside in neighborhood 
 psce2 <- glmGamPoi::pseudobulk(SingleCellExperiment(list(inside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask),
                                                         outside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask2))),
                       group_by = vars(sample_id, dist.cluster), n = n(),
@@ -291,13 +164,76 @@ comparison_data <- as_tibble(colData(psce2)) %>%
 comparison_data$expr
 comparison_data$origin
 
+psce2
+comparison_data
+```
+
+### Bootstrap for mean
+
+```{r}
+
+mask <- matrix(NA, nrow = length(gene_of_interest), ncol = ncol(fit), 
+               dimnames = list(gene_of_interest, colnames(fit)))
+
+mask2 <- matrix(1, nrow = length(gene_of_interest), ncol = ncol(fit), 
+               dimnames = list(gene_of_interest, colnames(fit)))
+
+for(id in gene_of_interest){
+  mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
+  mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
+}
+
+
+sce.pseudo <- SingleCellExperiment(
+  list(inside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask),
+  outside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask2)
+  ),
+  colData = as.data.frame(colData(fit))
+  )
+
+mean_stat <- function(data, indices) {
+  return(mean(data$counts[indices, ], na.rm = TRUE))
+}
+
+# Function to perform bootstrapping and add orig and expr columns
+perform_bootstrapping <- function(origin, expr_label) {
+  tibble(counts = as.data.frame(assay(sce.pseudo, origin)[1,])) %>% 
+    mutate(dist.cluster = sce.pseudo$dist.cluster) %>% 
+    filter(complete.cases(counts)) %>% 
+    group_by(dist.cluster) %>% 
+    do({
+      boot.res <- boot(., statistic = mean_stat, R = 1000)
+      ci <- boot.ci(boot.res, conf = c(0.95), type = c('perc'))
+      message(nrow(.))
+      data.frame(expr = boot.res$t, n = nrow(.), lower = ci$percent[4], upper = ci$percent[5])
+    }) %>% 
+    ungroup() %>%
+    mutate(origin = origin, symbol = expr_label)
+}
+
+# Perform bootstrapping for both "inside" and "outside"
+comparison_data <- bind_rows(
+  perform_bootstrapping("inside", gene_of_interest),
+  perform_bootstrapping("outside", gene_of_interest)
+)
+max(comparison_data$expr)
+```
+
+### Plot
+
+```{r}
+comparison_data <- tibble(comparison_data) %>%
+  mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>%
+  arrange(dist.cluster)
+
 expr_comparison_pl <- comparison_data %>%
-  mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
   ggplot(aes(x = dist.cluster, y = expr)) +
     geom_point(aes(color = origin), size = 1) +
-    geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
+    # geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), method = 'gam', formula = y ~ s(x, bs = "cs", k = 5), se = FALSE, linewidth = 2) +
+    geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8) +
+
     scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
-    scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
+    scale_y_continuous(limits = c(0, 3), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
     labs(color = "", y = "Expression(log transformed)",
@@ -308,13 +244,18 @@ expr_comparison_pl
 ```
 
 ```{r}
+filename <- paste0("correlation plot of dists",  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_pl, device = "png", width = 10, height = 8, dpi = 500)
+```
+
+```{r}
 expr_comparison_scatter <- comparison_data %>%
   mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>% 
   ggplot(aes(x = dist.cluster, y = expr)) +
     geom_point(aes(color = origin), size = 1) +
     # geom_smooth(aes(color = origin, x = as.integer(dist.cluster)), span = 1.5, spe = FALSE, linewidth = 2) +
     scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
-    scale_y_continuous(limits = c(0, 0.8), expand = expansion(add = 0)) +
+    scale_y_continuous(limits = c(0, 2), expand = expansion(add = 0)) +
     guides(x = guide_axis(angle = 45)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
     labs(color = "", y = "Expression",
@@ -324,12 +265,26 @@ expr_comparison_scatter <- comparison_data %>%
 expr_comparison_scatter
 ```
 
+```{r}
+filename <- paste0("correlation plot of dists_scatter",  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_scatter, device = "png", width = 10, height = 8, dpi = 500)
+```
+
 ```{r, paged.print=FALSE}
 is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
   left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
   mutate(inside = map2(cell_id, neighborhood, \(ref, nei_pixels) ref %in% nei_pixels)) %>%
   dplyr::select(-neighborhood) %>%
   unnest(c(inside, cell_id))
+
+```
+
+```{r}
+qs::qsave(is_inside, file.path(res.dir, "is_inside.qs"))
+
+```
+
+```{r}
 
 de_plot_data <- as_tibble(colData(fit), rownames = "cell_id") %>%
   mutate(umap = umap) %>%
@@ -359,11 +314,12 @@ dist_de_pl
 ```
 
 ```{r, paged.print=FALSE}
+# calculate the frac inside origin group!!
 rel_plt <- colData(fit) %>%
   as_tibble(rownames = "cell_id") %>%
   left_join(is_inside) %>%
   dplyr::count(dist.cluster, symbol, inside) %>%
-  mutate(frac = n / sum(n), .by = c(symbol, inside)) %>%
+  mutate(frac = n / sum(n), .by = c(symbol, inside)) %>%  # calculate the frac inside origin group!!
   mutate(dist.cluster = fct_relabel(dist.cluster, \(x) str_replace(x, ",", ", "))) %>%
   ggplot(aes(x = dist.cluster, y = frac)) +
     geom_col(aes(fill = inside), position = position_dodge2()) +
@@ -372,9 +328,36 @@ rel_plt <- colData(fit) %>%
     scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "lightgrey")) +
     guides(x = guide_axis(angle = 90)) +
     theme(axis.title.x = element_blank(), legend.position = "bottom") +
-    labs(color = "", y = "Rel. No. pixels")
+    labs(color = "", y = "Rel. No. pixels - Group-Wise Fractions")
 
- expr_comparison_scatter / rel_plt 
+rel_plt 
+
+# calculate the frac overall: divide by total amount of spots
+rel_plt_2 <- colData(fit) %>%
+  as_tibble(rownames = "cell_id") %>%
+  left_join(is_inside) %>%
+  dplyr::count(dist.cluster, symbol, inside) %>%
+  mutate(total_n = sum(n), .by = symbol) %>%  # Calculate total count per symbol
+  mutate(frac = n / total_n, .by = c(symbol, inside)) %>%  # calculate the frac inside origin group!!
+  mutate(dist.cluster = fct_relabel(dist.cluster, \(x) str_replace(x, ",", ", "))) %>%
+  ggplot(aes(x = dist.cluster, y = frac)) +
+    geom_col(aes(fill = inside), position = position_dodge2()) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    scale_x_discrete(position = "top") +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "lightgrey")) +
+    guides(x = guide_axis(angle = 90)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Rel. No. pixels - Overall Fractions")
+
+rel_plt_2
+```
+
+```{r}
+plot <- expr_comparison_pl / rel_plt /rel_plt_2
+filename <- paste0("prop plot of dists_scatter",  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plot, device = "png", width = 10, height = 14, dpi = 800)
+
+plot
 ```
 
 ## Gene counts
@@ -402,35 +385,24 @@ as_tibble(pos) %>%
 ## Misc.
 
 ```{r}
-library(ggplot2)
-library(dplyr)
+# Load the boot library
+library(boot)
 
-# Example data
-set.seed(123)
-group1 <- data.frame(x = rnorm(50, mean = 0), y = rnorm(50, mean = 0), group = 'A')
-group2 <- data.frame(x = rnorm(50, mean = 3), y = rnorm(50, mean = 3), group = 'B')
+# Sample data
+data <- rnorm(100)
 
-# Combine the data
-data <- rbind(group1, group2)
+# Define a function to calculate the statistic of interest (mean in this case)
+statistic_function <- function(data, indices) {
+  return(mean(data[indices]))
+}
 
-# Scale color values within each group
-data <- data %>%
-  group_by(group) %>%
-  mutate(color_value = scales::rescale(x))
+# Perform bootstrap
+boot_results <- boot(data, statistic_function, R = 1000)
 
-print(data)
-
-# Plotting
-p <- ggplot(data, aes(x = x, y = y, color = color_value)) +
-  geom_point(size = 3) +
-  scale_color_gradientn(colors = c("blue", "green", "red")) +
-  facet_wrap(~ group) +
-  labs(title = "Scatter Plot of Two Groups with Scaled Colors",
-       x = "X-axis",
-       y = "Y-axis",
-       color = "Scaled X") +
-  theme_minimal()
-
-print(p)
+# Calculate the confidence intervals
+ci <- boot.ci(boot_results, conf = c(0.95), type = c('perc'))
+ci$percent
+# Print the results
+print(ci)
 
 ```

@@ -1,0 +1,279 @@
+---
+title: "scRNA-seq"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(SingleCellExperiment)
+
+library(lemur)
+library(igraph)
+library(qs)
+
+# library(spacexr)
+library(purrr)
+
+library(stringr)
+library(Seurat)
+library(harmony)
+library(cowplot)
+```
+
+```{r}
+source("../../src/util.R")
+source("../../config/config.R")
+```
+
+# Prepare Data
+
+## Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+# load reference scRNA-seq: the first one 10,000
+ref_path <- get.refd.path()
+ref <- readRDS(ref_path)
+counts.sc <- ref@counts
+ctypes <- ref@cell_types
+prefix.bcs <- colnames(counts.sc)
+
+```
+
+```{r}
+# locate prefix without digits
+prefixs <- lapply(prefix.bcs, function(i) {
+                      outs <- str_locate_all(i, "_")[[1]]
+                      last <- outs[nrow(outs), 1, drop = T]
+                      digit.idx <- str_locate(i, "\\d")
+                      if (!is.na(digit.idx[1,1])) {
+                        last <- digit.idx[1,1]
+                      }
+                      sub <- substring(i, 1, last - 1)
+                      return(sub)}
+)
+
+prefixs2 <- lapply(prefix.bcs, function(i) {
+                      outs <- str_locate_all(i, "_")[[1]]
+                      last <- outs[1, 1, drop = T]
+                      sub <- substring(i, 1, last - 1)
+                      return(sub)}
+)
+
+
+sce <- SingleCellExperiment(
+  assays = list(counts = counts.sc)
+)
+
+prefixs <- unlist(prefixs, recursive = T)
+sce$samples <- prefixs
+
+prefixs2 <- unlist(prefixs2, recursive = T)
+sce$cell.group.4 <- prefixs2
+
+sce$ctypes <- ctypes
+logcounts(sce) <- transformGamPoi::shifted_log_transform(sce)
+
+```
+
+## Remove sample effect
+
+```{r}
+# seurat.obj <- CreateSeuratObject(counts = counts(sce), min.cells = 5, meta.data = as.data.frame(colData(sce))) %>%
+#     Seurat::NormalizeData(verbose = FALSE) %>%
+#     FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% 
+#     ScaleData(verbose = FALSE) %>% 
+#     RunPCA(pc.genes = pbmc@var.genes, npcs = 20, verbose = FALSE) %>% 
+#     RunHarmony("samples", plot_convergence = TRUE) %>% 
+#     RunUMAP(reduction = "harmony",  dims = 1:20)
+
+```
+
+```{r}
+umap <- scater::calculateUMAP(logcounts(sce))
+reducedDim(sce, "UMAP", withDimnames = FALSE) <- umap
+
+# reducedDim(sce, "UMAP.regressed", withDimnames = FALSE) <- Embeddings(seurat.obj, "umap")
+sce
+```
+
+## clustering
+
+```{r}
+num.cluster <- 4
+res.km <- kmeans(umap, centers = num.cluster)
+clusters <- as.factor(res.km$cluster)
+sce$clusters <- clusters
+```
+
+```{r}
+otherCells <- as_tibble(colData(sce)) %>% 
+                group_by(cell.group.4) %>% 
+                distinct(ctypes) %>% 
+                filter(cell.group.4 == "otherCells")
+
+cell.group.7 <- sce$cell.group.4
+idxs <- which(cell.group.7 == "otherCells")
+cell.group.7[idxs] <- as.character(sce$ctypes[idxs]) # factor to character
+cell.group.7 <-  factor(cell.group.7)
+
+sce$cell.group.7 <- cell.group.7
+
+table(sce$cell.group.4)
+dir.res <- get.res.dir()
+qsave(sce, file.path(dir.res, "SCE", "sce.qs"))
+```
+
+## Save data as csv file
+
+```{r}
+# file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
+# write.csv(counts.sc, file = file, row.names = TRUE)
+```
+
+# Visualization
+
+```{r}
+as_tibble(colData(sce)) %>%
+  mutate(umap = umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = ctypes), size = 0.5) +
+    labs(title = "UMAP of logcounts")
+
+```
+
+```{r}
+table(sce$cell.group.4)
+cg <- unique(sce$cell.group.4)
+# cell.group.4
+plot.cluster <- function(i) {
+    as_tibble(colData(sce)) %>%
+    mutate(umap = umap) %>%
+    filter(cell.group.4 == i) %>% 
+    ggplot(aes(x = umap[,1], y = umap[,2])) +
+      geom_point(aes(color = ctypes), size = 0.5) +
+      labs(title = paste0("UMAP of cell group - ", i))
+}
+
+plots <- lapply(cg, plot.cluster)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 2, rel_heights = 20)
+
+ggsave(filename = "UMAP of cell group.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
+```
+
+```{r}
+# kmeans cluster
+plot.cluster <- function(i) {
+    as_tibble(colData(sce)) %>%
+    mutate(umap = umap) %>%
+    filter(clusters == i) %>% 
+    ggplot(aes(x = umap[,1], y = umap[,2])) +
+      geom_point(aes(color = ctypes), size = 0.5) +
+      labs(title = paste0("UMAP of Kmeans cluster - ", i))
+}
+
+plots <- lapply(seq(num.cluster), plot.cluster)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 2, rel_heights = 20)
+
+ggsave(filename = "UMAP of Kmeans cluster grids.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
+```
+
+```{r}
+unique.cg <- unique(sce$cell.group.4)
+hl.type <- unique.cg[1]
+plot.cg <- function(hl.type) {
+   
+    color.group <- rep("grey", 4)
+    names(color.group) <- unique.cg
+    color.group[[hl.type]] <- "blue"
+    
+    plot <- as_tibble(colData(sce)) %>%
+      mutate(umap = umap) %>%
+      ggplot(aes(x = umap[,1], y = umap[,2])) +
+        geom_point(aes(color = cell.group.4), size = 0.5) +
+        scale_colour_manual(values = color.group) +
+        labs(title = "UMAP of cell.group.4")
+}
+
+plots <- lapply(unique.cg, plot.cg)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 2, rel_heights = 20)
+
+ggsave(filename = "UMAP of cell.group.4.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
+```
+
+```{r}
+unique.cg <- unique(sce$cell.group.7)
+hl.type <- unique.cg[1]
+plot.cg <- function(hl.type) {
+   
+    color.group <- rep("grey", 7)
+    names(color.group) <- unique.cg
+    color.group[[hl.type]] <- "blue"
+    
+    plot <- as_tibble(colData(sce)) %>%
+      mutate(umap = umap) %>%
+      ggplot(aes(x = umap[,1], y = umap[,2])) +
+        geom_point(aes(color = cell.group.7), size = 0.5) +
+        scale_colour_manual(values = color.group) +
+        labs(title = "UMAP of cell.group.7")
+}
+
+plots <- lapply(unique.cg, plot.cg)
+plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 3, rel_heights = 20)
+
+ggsave(filename = "UMAP of cell.group.7.svg", plot = plots.grid, width = 8, height = 6)
+
+plots.grid
+```
+
+```{r}
+plots.grid <- as_tibble(colData(sce)) %>%
+  mutate(umap = reducedDim(sce, "UMAP")) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = clusters), size = 0.5) +
+    labs(title = "UMAP of clusters")
+
+ggsave(filename = "UMAP of Kmeans cluster.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+```
+
+# Misc.
+
+```{r}
+# fine.ref <- readRDS("/data/myi/mt-spatial-transcriptomics/data/scRNA-seq/merged_subpop_down_for_CCI.RDS")
+# unique(fine.ref@active.ident)
+# 
+# main.ref <- readRDS("/data/myi/mt-spatial-transcriptomics/data/scRNA-seq/merged_subpop_down_main_clusters_for_CCI.RDS")
+# unique(main.ref@active.ident)
+# ncol(main.ref)
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>
+
+-   <https://portals.broadinstitute.org/harmony/articles/quickstart.html#integrating-cell-line-datasets-from-10x-1>

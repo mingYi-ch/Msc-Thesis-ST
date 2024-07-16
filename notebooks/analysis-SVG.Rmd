@@ -47,6 +47,9 @@ pos <- spatialCoords(spe)
 pos <- pos[, c('x','y')]
 pos <- as.matrix(pos)
 
+spe$col <- spatialCoords(spe)[,'x']
+spe$row <- spatialCoords(spe)[,'y']
+
 spe$x <- spatialCoords(spe)[,'x']
 spe$y <- spatialCoords(spe)[,'y']
 ```
@@ -90,8 +93,8 @@ plot <- as_tibble(colData(spe)) %>%
 
 ```{r}
 dir.res <- get.res.dir()
-filename = file.path(dir.res, "plots", "Cluster- stlearn - Louvain.svg")
-ggsave(filename = filename, plot = plot, device = "svg", width = 8, height = 6)
+filename = file.path(dir.res, "plots", "Cluster- stlearn - Louvain.pdf")
+ggsave(filename = filename, plot = plot, device = "pdf", width = 8, height = 6)
 ```
 
 # Gene-level test
@@ -99,7 +102,7 @@ ggsave(filename = filename, plot = plot, device = "svg", width = 8, height = 6)
 ```{r}
 set.seed(123)
 spatial_cluster <- "spatial_cluster"
-coordinates <-  c("x", "y")
+# coordinates <-  c("x", "y")
 
 results <- DESpace_test(spe = spe,
                         spatial_cluster = spatial_cluster, 

@@ -30,6 +30,8 @@ load.data  <- function(dir) {
   ## "pxl_col_in_fullres" = "y" coordinates, and "pxl_row_in_fullres" = "x" coordinates
   colnames(pos) <- c("x", "y")
   
+  # make bc the same order
+  gexp <- gexp[,rownames(pos)]
   spe <- SpatialExperiment(assay = gexp, spatialCoords = pos)
   
   assayNames(spe) <- 'counts'
@@ -65,8 +67,8 @@ get.dirs <- function(parent.dir) {
 
 
 # TODO: write test 
-# each point has at most 8 neighbours, return row idxs of neighbours including itself
-get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshold = 9000 ) {
+# each point has at most 6 neighbours, return row idxs of neighbours including itself
+get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), squared.radius = 9000 ) {
   dim.bc <- dim(coords)[1]
   adjacency.matrix <-  matrix(0, nrow = dim.bc, ncol = dim.bc)
   
@@ -76,7 +78,7 @@ get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshol
       pt1 <- coords[idx.1, ]
       pt2 <- coords[idx.2, ]
       
-      is.nei <- sum((pt1 - pt2)^2) < dist.sqr.threshold      
+      is.nei <- sum((pt1 - pt2)^2) < squared.radius      
       if (is.nei) {
         adjacency.matrix[idx.1, idx.2] <- 1
         adjacency.matrix[idx.2, idx.1] <- 1
@@ -90,10 +92,11 @@ get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), dist.sqr.threshol
 get.all.dists <- function(g, from, to) {
   # get components
   membership <- components(g)$membership
-  # find shortest dist, DP 
+  
   len.from <- length(from)
   len.to <- length(to)
   
+  # idx in from may be not continuous number
   from.map <- as.list(seq_len(len.from))
   names(from.map) <- from
   
@@ -108,6 +111,7 @@ get.all.dists <- function(g, from, to) {
     for (j in seq_len(len.to)) {
       from.idx <- from[i]
       to.idx <- to[j]
+      
       if (!is.na(dists.mat[i, j])) {
         # print(to.idx)
         next
@@ -118,14 +122,13 @@ get.all.dists <- function(g, from, to) {
         dists.mat[i, j] <- 0
       }else{
         shortest_path <- shortest_paths(g, from = from.idx, to = to.idx, output = "vpath")
-        vpath <- shortest_path$vpath 
-        vpath <- vpath[[1]]
-        len.path <- length(vpath)
+        vpath <- shortest_path$vpath[[1]]
+        
         # if a vertex is on the shortest path, we can calculate the shortest distance to the target vertex
-        for (k in seq_len(len.path)) {
+        for (k in seq_along(vpath)) {
           idx <- vpath[k]
           idx <-  as.character(idx)
-          dists.mat[from.map[[idx]], j] <- len.path - k
+          dists.mat[from.map[[idx]], j] <- length(vpath) - k
         }
       }
     }
@@ -133,20 +136,39 @@ get.all.dists <- function(g, from, to) {
   return(dists.mat)
 }
 
+# get.min.dists <- function(dists.mat, weights) {
+#   # scale to the range of 0 to 1
+#   dists.mat.finite <- dists.mat[is.finite(dists.mat)]
+#   
+#   spl.norm <- (dists.mat - min(dists.mat)) / (max(dists.mat.finite) - min(dists.mat))
+#   spl.norm.prop <- sweep(spl.norm, MARGIN = 2, STATS = weights, FUN="/") # divide each row by target vector
+#   
+#   # get min dist to a certain target
+#   min.dists <- rowMins(spl.norm.prop)
+#   
+#   return(min.dists)
+# }
+
 get.min.dists <- function(dists.mat, weights) {
-  # scale to the range of 0 to 1
-  dists.mat.finite <- dists.mat[is.finite(dists.mat)]
+  # Scale by weights
+  dists.mat <- sweep(dists.mat, MARGIN = 2, STATS = weights, FUN = "/")
   
-  spl.norm <- (dists.mat - min(dists.mat)) / (max(dists.mat.finite) - min(dists.mat))
-  spl.norm.prop <- sweep(spl.norm, MARGIN = 2, STATS = weights, FUN="/") # divide each row by target vector
+  # Get minimum distances
+  min.dists <- rowMins(dists.mat)
   
-  # get min dist to a certain target
-  min.dists <- rowMins(spl.norm.prop)
+  # Ensure non-Inf values are considered
+  min.mat.finite <- min.dists[is.finite(min.dists)]
   
-  return(min.dists)
+  # Normalize distances
+  min.val <- min(min.mat.finite)
+  max.val <- max(min.mat.finite)
+  
+  spl.norm <- (min.dists - min.val) / (max.val - min.val)
+  # spl.norm[!is.finite(spl.norm)] <- 1  # Assign 1 to any Inf values after normalization
+  
+  # spl.norm[is.na(spl.norm)] <- Inf
+  return(spl.norm)
 }
-
-
 
 ######### Custom ggplot2 theme, code from https://github.com/const-ae/lemur-Paper/blob/master/notebooks/util.R #########
 
@@ -464,7 +486,7 @@ correlationPlot2 <- function(mat, colTicks = NA, colLabs = NA, rowLabs = NA, tit
                                                    label.hjust = 0
     )) +
     
-    scale_y_discrete(labels = colTicks) +
+    scale_y_discrete(labels = colnames(mat)) +
     
     ggplot2::coord_fixed() 
   
@@ -539,6 +561,7 @@ vizTopic2 <- function(theta, pos, topic,
   
   p <- p +
     ggplot2::theme(
+      plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), "cm"),
       panel.grid = ggplot2::element_blank(),
       axis.line = ggplot2::element_blank(),
       axis.text.x = ggplot2::element_blank(),

@@ -18,7 +18,7 @@ get.std.path <- function() {
 
 # reference scRNA-seq data path
 get.refd.path <- function() {
-  path <- "~/data/ref_from_merged_subpop_down_main_clusters_for_CCI.rds"
+  path <- "~/data/mt-spatial-transcriptomics/data/scRNA-seq/ref_from_merged_subpop_down_main_clusters_for_CCI.rds"
   if (host == "local") {
     path <- paste(proj.dir.local, 'data/reference/ref_from_merged_subpop_down_main_clusters_for_CCI.rds', sep = '/')
   }

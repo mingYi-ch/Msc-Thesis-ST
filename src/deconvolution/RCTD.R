@@ -6,8 +6,9 @@ source("./src/util.R")
 source("./config/config.R")
 
 # load data as spatialExperiment object
-data_dir <- get.std.path()
-spe <- load.data(data_dir)
+data.dir <- get.data.dir()
+spe.path <- file.path(data.dir, "processed", "spe_subset.qs")
+spe <- qread(spe.path)
 
 # load reference data set
 dir.res <- get.res.dir()
@@ -19,8 +20,6 @@ nUMI <- colSums(counts.sc)
 names(nUMI) <- colnames(counts.sc) # create nUMI named list
 names(ctypes) <- colnames(counts.sc) # create nUMI named list
 ref <- Reference(counts.sc, ctypes, nUMI)
-# file <- file.path(proj.dir.cluster, "data/counts_sc.csv")
-# write.csv(counts.sc, file = , row.names = TRUE)
 counts <- assay(spe, "counts") # gene by barcode
 
 # Count occurrences of each column name

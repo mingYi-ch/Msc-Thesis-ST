@@ -35,7 +35,7 @@ coords <- matrix(c(
 ```
 
 ```{r}
-adjacency.matrix <- get.adjacency.matrix(coords, dist.sqr.threshold = 2.5)
+adjacency.matrix <- get.adjacency.matrix(coords, squared.radius = 2.5)
 sum(adjacency.matrix)
 
 # build a graph

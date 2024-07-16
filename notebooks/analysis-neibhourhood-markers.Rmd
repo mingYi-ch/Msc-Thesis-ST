@@ -1,0 +1,278 @@
+---
+title: "Deconvolution"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+# library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+library(cowplot)
+
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
+library(qs)
+
+library(purrr)
+# library(BayesSpace) # modified for identifying neighbours
+library(DESpace)
+library(Seurat)
+```
+
+```{r}
+source("../src/util.R")
+source("../config/config.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+dir <-  get.std.path()
+spe <- load.data(dir)
+
+pos <- spatialCoords(spe)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+
+spe$col <- spatialCoords(spe)[,'x']
+spe$row <- spatialCoords(spe)[,'y']
+
+spe$x <- spatialCoords(spe)[,'x']
+spe$y <- spatialCoords(spe)[,'y']
+```
+
+```{r}
+res.dir <- file.path(get.res.dir(), "LEMUR")
+fit <- qs::qread(file.path(res.dir, "fit_small.qs"))
+nei <- qs::qread(file.path(res.dir, "nei_small.qs"))
+is_inside <- qs::qread(file.path(res.dir, "is_inside.qs"))
+```
+
+# QC
+
+```{r}
+# # Calculate per-spot QC metrics and store in colData
+# spe <- scuttle::addPerCellQC(spe,)
+# # Remove combined set of low-quality spots
+# spe <- spe[, !(colData(spe)$sum < 10 | # library size
+#                 colData(spe)$detected < 10)]      # number of expressed genes
+# # Discard lowly abundant genes, which were detected in less than 20 spots.
+# qc_low_gene <- rowSums(assays(spe)$counts > 0) >= 20
+#     # Remove lowly abundant genes
+# spe <- spe[qc_low_gene,]
+
+logcounts(spe) <- transformGamPoi::shifted_log_transform(spe)
+```
+
+# Clustering
+
+```{r}
+spatial_cluster <- as.numeric(is_inside$inside)
+names(spatial_cluster) <- is_inside$cell_id
+spe <- spe[,is_inside$cell_id]
+spe$spatial_cluster <- spatial_cluster
+
+```
+
+# Gene-level test
+
+```{r}
+set.seed(123)
+spatial_cluster <- "spatial_cluster"
+# coordinates <-  c("x", "y")
+
+results <- DESpace_test(spe = spe,
+                        spatial_cluster = spatial_cluster, 
+                        verbose = TRUE)
+
+head(results$gene_results, 3)
+feature <- results$gene_results$gene_id[seq_len(3)]
+# FeaturePlot(spe, feature, ncol = 3, title = TRUE)
+
+feature %in% rownames(logcounts(spe))
+```
+
+```{r}
+gcnt <- logcounts(spe)[feature,][1,]
+
+plot1 <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt) %>%
+  ggplot(aes(x = x, y = y, color = gcnt)) +
+    geom_point(size = 1, stroke = 0, alpha = 0.5) +
+    scale_color_gradient2() +
+    labs(title = paste0("Gene - ", feature[1]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
+
+gcnt <- logcounts(spe)[feature,][2,]
+
+plot2 <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt) %>%
+  ggplot(aes(x = x, y = y, color = gcnt)) +
+    geom_point(size = 1, stroke = 0, alpha = 0.5) +
+    scale_color_gradient2() +
+    labs(title = paste0("Gene - ", feature[2]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
+
+gcnt <- logcounts(spe)[feature,][3,]
+
+plot3 <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt) %>%
+  ggplot(aes(x = x, y = y, color = gcnt)) +
+    geom_point(size = 1, stroke = 0, alpha = 0.5) +
+    scale_color_gradient2() +
+    labs(title = paste0("Gene - ", feature[3]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
+
+plot <- plot_grid(plot1, plot2, plot3)
+
+filename = file.path(dir.res, "plots", "DESpace_genes.pdf")
+ggsave(filename = filename, plot = plot, device = "pdf", width = 8, height = 6)
+
+plot
+```
+
+```{r}
+FeaturePlot(spe, feature, 
+            # coordinates = coordinates, 
+            Annotated_cluster = TRUE,
+            spatial_cluster = spatial_cluster, 
+            cluster = 'all', 
+            legend_cluster = TRUE, title = TRUE)
+```
+
+# Individual cluster test
+
+```{r}
+set.seed(123)
+cluster_results <- individual_test(spe, 
+                                    edgeR_y = results$estimated_y,
+                                    spatial_cluster = spatial_cluster)
+
+names(cluster_results)
+```
+
+```{r}
+target.cluster <- "1"
+# Check top genes for target.cluster
+results_target_both <- top_results(cluster_results = cluster_results, 
+                                cluster = target.cluster, 
+                                high_low = "both")
+
+head(results_target_both, 3)
+```
+
+# Markers 
+
+## scRNA-seq
+
+```{r}
+# load reference data set
+dir.data <- get.data.dir()
+sce.path <- file.path(dir.data, "scRNA-seq", "sce.qs")
+# qsave(sce, sce.path)
+sce.subset <- qread(sce.path)
+```
+
+```{r}
+# QC
+seurat_obj <- as.Seurat(sce.subset, 
+                        counts = "counts", data = "logcounts", 
+                        min.cells = 3, min.features = 200)
+
+names(sce.subset$ctypes) <- colnames(sce.subset)
+seurat_obj@active.ident <- sce.subset$ctypes
+
+table(sce.subset$ctypes)
+seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+seurat_obj <- subset(seurat_obj, subset = nFeature_originalexp > 200 & nFeature_originalexp < 2500 & percent.mt < 5)
+
+# marker genes
+cluster_of_interest <- "POSTN+ Sublining"
+markers <- FindMarkers(object = seurat_obj, ident.1 = cluster_of_interest)
+top_n(markers, 10, wt = "avg_log2FC")
+"THY1" %in% markers
+```
+
+## Spatial
+
+```{r}
+seurat_obj_spe <- as.Seurat(spe, counts = "counts", data = "logcounts")
+seurat_obj_spe@active.ident <- factor(seurat_obj_spe$spatial_cluster)
+
+cluster_of_interest <- "1"
+markers <- FindMarkers(object = seurat_obj_spe, ident.1 = cluster_of_interest)
+"THY1" %in% top_n(markers, 10, wt = "avg_log2FC")
+"THY1" %in% rownames(spe)
+
+```
+
+# Misc
+
+```{r}
+# Create a simple unweighted graph
+# Example edge list
+edges <- data.frame(from = c(0, 1, 1, 2), to = c(1, 2, 3, 3))
+
+# Create a graph from the edge list
+graph <- graph.data.frame(edges, directed = FALSE)  # Adjust 'directed' as needed
+
+
+# Specify source and target vertices
+source <- 1
+target <- 3
+
+# Find the shortest path
+shortest_paths <- shortest_paths(graph, from = source, to = target)
+shortest_paths$vpath
+# Check if a path exists
+if (length(shortest_paths) > 0) {
+    # Access the first shortest path (modify as needed)
+    shortest_path <- shortest_paths[[1]]
+
+    cat("Shortest path:", shortest_path)
+} else {
+    cat("No path exists between", source, "and", target)
+}
+
+
+```
+
+```{r}
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
+deconvolution_topic_features_k10 <- read.csv(path)
+head(deconvolution_topic_features_k10)
+colnames(deconvolution_topic_features_k10)
+
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
+deconvolved_spots_k10 <- read.csv(path)
+head(deconvolved_spots_k10)
+```
+
+```{r}
+# Create a matrix (you can replace this with your own data)
+my_matrix <- matrix(c(1, 2, 3, 4, 5, 6, 3, 3, -Inf), ncol = 3)
+
+# Calculate row minimums, ignoring NA values
+row_mins <- rowMins(my_matrix, na.rm = TRUE)
+
+# Print the result
+print(row_mins)
+
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>
