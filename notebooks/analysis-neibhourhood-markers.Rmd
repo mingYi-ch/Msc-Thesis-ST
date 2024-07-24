@@ -88,91 +88,7 @@ spe$spatial_cluster <- spatial_cluster
 
 ```
 
-# Gene-level test
-
-```{r}
-set.seed(123)
-spatial_cluster <- "spatial_cluster"
-# coordinates <-  c("x", "y")
-
-results <- DESpace_test(spe = spe,
-                        spatial_cluster = spatial_cluster, 
-                        verbose = TRUE)
-
-head(results$gene_results, 3)
-feature <- results$gene_results$gene_id[seq_len(3)]
-# FeaturePlot(spe, feature, ncol = 3, title = TRUE)
-
-feature %in% rownames(logcounts(spe))
-```
-
-```{r}
-gcnt <- logcounts(spe)[feature,][1,]
-
-plot1 <- as_tibble(spatialCoords(spe)) %>%
-  mutate(gcnt = gcnt) %>%
-  ggplot(aes(x = x, y = y, color = gcnt)) +
-    geom_point(size = 1, stroke = 0, alpha = 0.5) +
-    scale_color_gradient2() +
-    labs(title = paste0("Gene - ", feature[1]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
-
-gcnt <- logcounts(spe)[feature,][2,]
-
-plot2 <- as_tibble(spatialCoords(spe)) %>%
-  mutate(gcnt = gcnt) %>%
-  ggplot(aes(x = x, y = y, color = gcnt)) +
-    geom_point(size = 1, stroke = 0, alpha = 0.5) +
-    scale_color_gradient2() +
-    labs(title = paste0("Gene - ", feature[2]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
-
-gcnt <- logcounts(spe)[feature,][3,]
-
-plot3 <- as_tibble(spatialCoords(spe)) %>%
-  mutate(gcnt = gcnt) %>%
-  ggplot(aes(x = x, y = y, color = gcnt)) +
-    geom_point(size = 1, stroke = 0, alpha = 0.5) +
-    scale_color_gradient2() +
-    labs(title = paste0("Gene - ", feature[3]), x = "pxl_row_in_fullres", y = "pxl_col_in_fullres", color = "Log Gexp")
-
-plot <- plot_grid(plot1, plot2, plot3)
-
-filename = file.path(dir.res, "plots", "DESpace_genes.pdf")
-ggsave(filename = filename, plot = plot, device = "pdf", width = 8, height = 6)
-
-plot
-```
-
-```{r}
-FeaturePlot(spe, feature, 
-            # coordinates = coordinates, 
-            Annotated_cluster = TRUE,
-            spatial_cluster = spatial_cluster, 
-            cluster = 'all', 
-            legend_cluster = TRUE, title = TRUE)
-```
-
-# Individual cluster test
-
-```{r}
-set.seed(123)
-cluster_results <- individual_test(spe, 
-                                    edgeR_y = results$estimated_y,
-                                    spatial_cluster = spatial_cluster)
-
-names(cluster_results)
-```
-
-```{r}
-target.cluster <- "1"
-# Check top genes for target.cluster
-results_target_both <- top_results(cluster_results = cluster_results, 
-                                cluster = target.cluster, 
-                                high_low = "both")
-
-head(results_target_both, 3)
-```
-
-# Markers 
+# Markers
 
 ## scRNA-seq
 
@@ -193,15 +109,17 @@ seurat_obj <- as.Seurat(sce.subset,
 names(sce.subset$ctypes) <- colnames(sce.subset)
 seurat_obj@active.ident <- sce.subset$ctypes
 
-table(sce.subset$ctypes)
+# table(sce.subset$ctypes)
 seurat_obj[["percent.mt"]] <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
 seurat_obj <- subset(seurat_obj, subset = nFeature_originalexp > 200 & nFeature_originalexp < 2500 & percent.mt < 5)
 
 # marker genes
 cluster_of_interest <- "POSTN+ Sublining"
-markers <- FindMarkers(object = seurat_obj, ident.1 = cluster_of_interest)
-top_n(markers, 10, wt = "avg_log2FC")
-"THY1" %in% markers
+markers.sc <- FindMarkers(object = seurat_obj, ident.1 = cluster_of_interest, min.pct = 0.25)
+top_n_markers <- top_n(markers.sc, 10, wt = avg_log2FC) %>% 
+                rownames()
+
+"THY1" %in% markers.sc
 ```
 
 ## Spatial
@@ -211,10 +129,15 @@ seurat_obj_spe <- as.Seurat(spe, counts = "counts", data = "logcounts")
 seurat_obj_spe@active.ident <- factor(seurat_obj_spe$spatial_cluster)
 
 cluster_of_interest <- "1"
-markers <- FindMarkers(object = seurat_obj_spe, ident.1 = cluster_of_interest)
-"THY1" %in% top_n(markers, 10, wt = "avg_log2FC")
-"THY1" %in% rownames(spe)
+markers.spe <- FindMarkers(object = seurat_obj_spe, ident.1 = cluster_of_interest) %>% 
+                filter(pct.1 > 0.25)
+top_n(markers.spe, 10, wt = pct.1)
+top_n(markers.spe, 10, wt = avg_log2FC)
+"THY1" %in% rownames(spe) 
+```
 
+```{r}
+intersect(rownames(top_n(markers.spe, 30, wt = avg_log2FC)), rownames(top_n(markers.sc, 30, wt = avg_log2FC)))
 ```
 
 # Misc

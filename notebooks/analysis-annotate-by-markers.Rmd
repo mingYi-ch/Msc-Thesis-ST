@@ -69,20 +69,21 @@ ref.counts.all <- t(counts(ref)) # ctype x gene
 # Find marker genes
 
 ```{r}
-# Endothelial Cells
-target.cell <- "Endothelial Cells"
-marker.sel <- "PECAM1"
-threshold <- 5
-
-marker.sel <- "VWF"
-threshold <- 3
-
-
 # SynFib
 target.cell <- "SynFib"
 marker.sel <- "COL1A2"
 threshold <- 5
 
+# Endothelial Cells
+target.cell <- "Endothelial Cells"
+
+
+
+marker.sel <- "VWF"
+threshold <- 3
+
+marker.sel <- "PECAM1"
+threshold <- 5
 ```
 
 ```{r}
@@ -112,11 +113,11 @@ plt_1 <- as_tibble(df) %>%
     filter(ctypes == target.cell) %>% 
     ggplot(aes(x = count,  fill = ctypes)) +
     geom_bar() +
-    facet_wrap(~ ctypes, scales = "free_y") +
+    # facet_wrap(~ ctypes, scales = "free_y") +
     theme_minimal() +
     labs(title = glue("Frequency of {marker.sel} in scRNA-seq Data"),
          x = marker.sel,
-         y = "Count")
+         y = "Frequency")
 plt_1
 
 
@@ -128,10 +129,10 @@ p <- as_tibble(df) %>%
     theme_minimal() +
     labs(title = glue("Frequency of {marker.sel} in scRNA-seq Data"),
          x = marker.sel,
-         y = "Count")
+         y = "Frequency")
 p
 
-p <- as_tibble(df) %>% 
+plt_2 <- as_tibble(df) %>% 
     filter(count > 0) %>% 
     ggplot(aes(x = count,  fill = ctypes)) +
     geom_bar() +
@@ -139,8 +140,8 @@ p <- as_tibble(df) %>%
     theme_minimal() +
     labs(title = glue("Frequency of {marker.sel} in scRNA-seq Data"),
          x = marker.sel,
-         y = "Count")
-p
+         y = "Frequency")
+plt_2
 
 p <- as_tibble(df) %>% 
     filter(count > quantile(df$count, 0.05) & count < quantile(df$count, 0.95)) %>% 
@@ -150,7 +151,7 @@ p <- as_tibble(df) %>%
     theme_minimal() +
     labs(title = glue("Frequency of {marker.sel} in scRNA-seq Data"),
          x = marker.sel,
-         y = "Count")
+         y = "Frequency")
 p
 
 p <- as_tibble(df) %>% 
@@ -161,13 +162,16 @@ p <- as_tibble(df) %>%
     theme_minimal() +
     labs(title = glue("Frequency of {marker.sel} in scRNA-seq Data"),
          x = marker.sel,
-         y = "Count")
+         y = "Frequency")
 p
 
 gexp.target <- counts(spe)[marker.sel, ]
 # marker.sel %in% rownames(marker.genes)
 table(gexp.target)
 
+plt_2
+filename <- paste0("Frequency of ", marker.sel, "-all-ctypes.png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plt_2, device = "png", width = 10, height = 8, dpi = 500)
 ```
 
 ```{r}

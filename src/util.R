@@ -2,6 +2,61 @@ library(SpatialExperiment)
 library(igraph)
 library(ggplot2)
 
+# add Inf, n + 1 groups
+bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
+  groups <- seq(from, to, length.out = n+1)
+  
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n + 1)
+  
+  groups <- c(groups, Inf)
+  res[is.infinite(x)] <- n + 1
+  labels[n + 1] <- "Inf"
+  
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    factor(res, levels = seq_len(n + 1), labels = labels)
+  }else{
+    res
+  }
+}
+
+# add Inf, n + 1 groups
+# !! Values in groups need to be changed due to different value range
+bin.dists2 <- function(x, groups, add_label = TRUE, label_fmt = "%.3f"){
+  # groups <- seq(from, to, length.out = n+1)
+  n <- length(groups) -1
+  
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n + 1)
+  
+  groups <- c(groups, Inf)
+  res[is.infinite(x)] <- n + 1
+  labels[n + 1] <- "Inf"
+  
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    factor(res, levels = seq_len(n + 1), labels = labels)
+  }else{
+    res
+  }
+}
 
 load.data  <- function(dir) {
   # load counts and coords
@@ -91,7 +146,7 @@ get.adjacency.matrix <- function(coords, nei.diff = seq(0, 3), squared.radius = 
 
 get.all.dists <- function(g, from, to) {
   # get components
-  membership <- components(g)$membership
+  membership <- igraph::components(g)$membership
   
   len.from <- length(from)
   len.to <- length(to)
@@ -149,7 +204,7 @@ get.all.dists <- function(g, from, to) {
 #   return(min.dists)
 # }
 
-get.min.dists <- function(dists.mat, weights) {
+get.min.dists <- function(dists.mat, weights, normalize = FALSE) {
   # Scale by weights
   dists.mat <- sweep(dists.mat, MARGIN = 2, STATS = weights, FUN = "/")
   
@@ -159,15 +214,18 @@ get.min.dists <- function(dists.mat, weights) {
   # Ensure non-Inf values are considered
   min.mat.finite <- min.dists[is.finite(min.dists)]
   
-  # Normalize distances
-  min.val <- min(min.mat.finite)
-  max.val <- max(min.mat.finite)
-  
-  spl.norm <- (min.dists - min.val) / (max.val - min.val)
-  # spl.norm[!is.finite(spl.norm)] <- 1  # Assign 1 to any Inf values after normalization
-  
-  # spl.norm[is.na(spl.norm)] <- Inf
-  return(spl.norm)
+  if (normalize) {
+    # Normalize distances
+    min.val <- min(min.mat.finite)
+    max.val <- max(min.mat.finite)
+    
+    spl.norm <- (min.dists - min.val) / (max.val - min.val)
+    # spl.norm[!is.finite(spl.norm)] <- 1  # Assign 1 to any Inf values after normalization
+    
+    # spl.norm[is.na(spl.norm)] <- Inf
+    return(spl.norm)
+  }
+  return(min.dists)
 }
 
 ######### Custom ggplot2 theme, code from https://github.com/const-ae/lemur-Paper/blob/master/notebooks/util.R #########

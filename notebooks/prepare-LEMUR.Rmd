@@ -11,7 +11,7 @@ output.width: "75%"
 ```{r}
 library(Matrix)
 library(ggplot2)
-library(gghighlight)
+# library(gghighlight)
 library(tidyverse)
 
 library(STdeconvolve)
@@ -21,7 +21,7 @@ library(igraph)
 library(qs)
 
 library(dplyr)
-# library(spacexr)
+library(Seurat)
 ```
 
 ```{r}
@@ -53,16 +53,70 @@ spe
 
 ```{r}
 res.dir <- get.res.dir()
-
 # model results
 deconProp <- qread(file.path(res.dir, "deconvolution/deconProp_best.qs"))
 
 # maually by marker
-is.ec.spot <- qread(file.path(res.dir, "deconvolution/ECs_manually_VWF.qs"))
-is.ec.spot <- qread(file.path(res.dir, "deconvolution/ECs_manually_PECAM1.qs"))
 
+
+marker.sel <- "VWF"
+is.ec.spot.VWF <- qread(file.path(res.dir, "deconvolution/ECs_manually_VWF.qs"))
+
+# interect of markers annot.
+# marker.sel <- "VWF & PECAM1"
+# is.ec.spot <- is.ec.spot.PECAM1 & is.ec.spot.VWF
+# 
+# is.ec.spot <- data.frame(is.ec.spot = is.ec.spot)
+
+marker.sel <- "PECAM1"
+is.ec.spot.PECAM1 <- qread(file.path(res.dir, "deconvolution/ECs_manually_PECAM1.qs"))
+is.ec.spot <- is.ec.spot.PECAM1
 # wether use the deconvolution model
 use.model <- F
+```
+
+# Variable features
+
+```{r}
+seurat_obj <- CreateSeuratObject(counts = counts(spe)) %>% 
+              NormalizeData(verbose = FALSE) %>%
+              FindVariableFeatures(selection.method = "vst", nfeatures = 2000)
+var.feat <- VariableFeatures(seurat_obj)
+spe_var_feat <- spe[var.feat,]
+```
+
+# UMAP
+
+```{r}
+seurat_obj <- CreateSeuratObject(counts = counts(spe)) %>% 
+              NormalizeData(verbose = FALSE) %>%
+              FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>%
+              ScaleData(verbose = FALSE) %>%
+              RunPCA(features = VariableFeatures(.), npcs = 50, verbose = FALSE) %>%
+              RunUMAP(dims = 1:10)
+
+umap <- Embeddings(seurat_obj, reduction = "umap")
+head(umap)
+```
+
+```{r}
+spe$is.ec.spot <-  as.factor(is.ec.spot$is.ec.spot)
+
+# Create the ggplot
+plots <- as_tibble(colData(spe)) %>%
+  mutate(UMAP_1 = umap[,1], UMAP_2 = umap[,2]) %>% 
+  ggplot(aes(x = UMAP_1, y = UMAP_2)) +
+  geom_point(aes(color = is.ec.spot), size = 0.7, stroke = 0) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey"), 
+                     labels = c("TRUE" = "EC Spot", "FALSE" = "Non-EC Spot")) +
+  guides(color = guide_legend(override.aes = list(size = 1))) +
+  # theme_minimal() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "EC Spot")
+
+plots
+
+filename <- paste0("ECs in UMAP",  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
 ```
 
 # Define covariate
@@ -96,7 +150,6 @@ if (use.model) {
   weights <- rep(1, length(bc.target))
 }
 
-
 ```
 
 ```{r}
@@ -107,7 +160,7 @@ sum(adjacency.matrix)
 ```{r}
 # build a graph
 g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
-components(g)$no
+igraph::components(g)$no
 
 node_id <- 409
 neighbors_node <- neighbors(g, v = node_id, mode = "all")
@@ -130,10 +183,26 @@ message("Sys.time execution time:", execution_time)
 ```
 
 ```{r}
-min.dists <- get.min.dists(dists.mat, weights)
-names(min.dists) <- colnames(spe)
-spe$min.dists <- min.dists
-# table(min.dists)
+re.run <- T
+res.dir.LEMUR <- file.path(get.res.dir(), "LEMUR")
+
+if (re.run) {
+  min.dists <- get.min.dists(dists.mat, weights, normalize = T)
+  names(min.dists) <- colnames(spe)
+  spe$min.dists <- min.dists
+  
+  table(min.dists)
+  
+  # save min.dists
+  if (!dir.exists(res.dir.LEMUR)) {
+    dir.create(res.dir.LEMUR)
+  }
+  qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
+}else{
+  spe <- qread(file.path(res.dir.LEMUR, "se_dist.qs"))
+}
+
+spe
 ```
 
 ## Visualize Dists to targets
@@ -141,19 +210,18 @@ spe$min.dists <- min.dists
 ```{r}
 # maually by marker
 cluster <-  "Endothelial Cells"
-marker.sel <- "PECAM1"
 
 method <- paste0("Manually by marker ", marker.sel)
 
 groups <- rep("others", ncol(spe))
 names(groups) <- colnames(spe)
 groups[bc.target] <- cluster
-
+min.dists <- spe$min.dists
 strokes <- ifelse(groups == cluster, 0.5, 0)
 
 # Create ggplot object
 plots <- as_tibble(spatialCoords(spe)) %>%
-  mutate(min.dists = min.dists, groups = groups, strokes = strokes) %>%
+  mutate(min.dists = spe$min.dists, groups = groups, strokes = strokes) %>%
   ggplot(aes(x = x, y = y, shape = groups, fill = min.dists)) +
   geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
   scale_shape_manual(values = c(24, 21)) +
@@ -172,16 +240,66 @@ plots
 # Prepare LEMUR
 
 ```{r}
-# add Inf, n + 1 groups
-bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
-  groups <- seq(from, to, length.out = n+1)
+identify.groups <- function(x, min_spots = 65) {
+  x_counts <- as.data.frame(table(x))
+  colnames(x_counts) <- c("min.dist", "count")
+  x_counts$min.dist <- x_counts$min.dist %>% 
+                          as.character() %>% 
+                          as.numeric()
   
+  num_row <- nrow(x_counts)
+  groups <- c()
+  i <- 1
+  while (i <= num_row) {
+    if (x_counts$count[i] >= min_spots) {
+      groups <- c(groups, x_counts$min.dist[i])
+      i <- i + 1
+    } else {
+      if (i == 1)   groups <- c(groups, 0)
+      sum <- x_counts$count[i]
+      start_i <- i
+      
+      # aggeregate backwards till reach min_spots
+      while (sum < min_spots && i < num_row) {
+        i <- i + 1
+        sum <- sum + x_counts$count[i]
+      }
+      
+      #  insert different intervals under different conditions
+      if (sum < min_spots && i >= num_row) {
+        groups <- c(groups, x_counts$min.dist[num_row])
+      } else if (sum >= min_spots && i >= num_row){
+        groups <- c(groups, x_counts$min.dist[start_i], x_counts$min.dist[num_row])
+      } else if(start_i != 1) {
+        groups <- c(groups, x_counts$min.dist[start_i])
+      }
+      
+      i <- i + 1
+    }
+    # message(i)
+  }
+  return(groups)
+}
+
+identify.groups(spe$min.dists)
+
+x_counts <- as.data.frame(table(spe$min.dists))
+colnames(x_counts) <- c("min.dist", "count")
+
+
+```
+
+```{r}
+# no dist bin for  min_spots > 60
+bin.dists3 <- function(x, add_label = TRUE, label_fmt = "%.3f", min_spots){
+  groups <- identify.groups(x, min_spots)
+  n <- length(groups) - 1
   res <- rep(NA_integer_, length(x))
-  labels <- rep(NA_character_, n + 1)
+  labels <- rep(NA_character_, n)
   
-  groups <- c(groups, Inf)
-  res[is.infinite(x)] <- n + 1
-  labels[n + 1] <- "Inf"
+  # groups <- c(groups, Inf)
+  # res[is.infinite(x)] <- n + 1
+  # labels[n + 1] <- "Inf"
   
   for(idx in seq_len(n)){
     if(idx == n){
@@ -193,40 +311,7 @@ bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_la
     }
   }
   if(add_label){
-    factor(res, levels = seq_len(n + 1), labels = labels)
-  }else{
-    res
-  }
-}
-
-bin.dists(seq(20, 10), n = 6, label_fmt = "%.f")
-```
-
-```{r}
-# add Inf, n + 1 groups
-# !! Values in groups need to be changed due to different value range
-bin.dists2 <- function(x, groups, add_label = TRUE, label_fmt = "%.3f"){
-  # groups <- seq(from, to, length.out = n+1)
-  n <- length(groups) -1
-  
-  res <- rep(NA_integer_, length(x))
-  labels <- rep(NA_character_, n + 1)
-  
-  groups <- c(groups, Inf)
-  res[is.infinite(x)] <- n + 1
-  labels[n + 1] <- "Inf"
-  
-  for(idx in seq_len(n)){
-    if(idx == n){
-      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
-      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
-    }else{
-      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
-      res[x >= groups[idx] & x < groups[idx+1]] <- idx
-    }
-  }
-  if(add_label){
-    factor(res, levels = seq_len(n + 1), labels = labels)
+    factor(res, levels = seq_len(n), labels = labels)
   }else{
     res
   }
@@ -235,11 +320,18 @@ bin.dists2 <- function(x, groups, add_label = TRUE, label_fmt = "%.3f"){
 ```
 
 ```{r}
-groups <- c(0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.35,  0.6, 1.0)
+groups <- c(0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.35, 0.6, 1.0)
 spe$dist.cluster <- bin.dists2(spe$min.dists, groups = groups, label_fmt = "%.3f")
-#spe$dist.cluster <- bin.dists(spe$min.dists, n = 10, label_fmt = "%.3f")
 
+# spe$dist.cluster <- bin.dists3(spe$min.dists, label_fmt = "%.f", min_spots = 100)
 table(spe$dist.cluster)
+
+# check dist.cluster is correct
+as_tibble(colData(spe)) %>% group_by(dist.cluster) %>%
+  filter(dist.cluster == "[1,2)")
+
+# save
+qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
 ```
 
 ```{r}
@@ -263,6 +355,7 @@ plots
 ```
 
 ```{r}
+spe
 set.seed(1)
 logcounts(spe) <- transformGamPoi::shifted_log_transform(spe)
 umap <- scater::calculateUMAP(spe)
@@ -272,50 +365,74 @@ reducedDim(spe, withDimnames = FALSE) <- umap
 
 ```{r}
 set.seed(1)
+
 # Remove inf
 finite.mask <- is.finite(min.dists)
 min.dists.finite <- min.dists[finite.mask]
 spe.finite <- spe[, finite.mask]
 spe.finite$dist.cluster <- droplevels(spe.finite$dist.cluster)
 table(spe.finite$dist.cluster)
-
-# subset genes
-# spe.finite <- spe.finite[1:100, ]
 dim(spe.finite)
-fit <- lemur::lemur(spe.finite, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
+spe <-  spe.finite
+
+fit <- lemur::lemur(spe, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
 
 set.seed(1)
 fit <- lemur::align_harmony(fit)
 ```
 
 ```{r}
-table(spe.finite$dist.cluster)
-bin.levels <- levels(spe.finite$dist.cluster)
-idx.1 <- length(bin.levels) - 1
-idx.2 <- 2
+table(spe$dist.cluster)
+bin.levels <- levels(spe$dist.cluster)
+
+# DE is signed
+idx.1 <- 2
+idx.2 <- length(bin.levels) - 1
 
 fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[idx.1]) - cond(dist.cluster = bin.levels[idx.2]))
 set.seed(1)
 DE <- assay(fit, "DE")
 dim(DE)
 
-nei <- lemur::find_de_neighborhoods(fit, group_by = vars(sample_id, dist.cluster), test_method = "none")
 ```
 
 ```{r}
-res.dir.LEMUR <- file.path(get.res.dir(), "LEMUR")
-if (!dir.exists(res.dir.LEMUR)) {
-  dir.create(res.dir.LEMUR)
-}
+# gene_of_interest <- "THY1"
+# gene_of_interest <- top_n_markers
+# fit <- fit[gene_of_interest, ]
 
-qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
+nei <- lemur::find_de_neighborhoods(fit, group_by = vars(dist.cluster), test_method = "none")
+```
+
+## Cluster by THY1
+
+```{r}
+gene_of_interest <- "THY1"
+
+DE.THY1 <- assay(fit, "DE")[gene_of_interest,]
+hist(DE.THY1, main = "predicted DE.THY1 hist", xlab = "DE.THY1", ylab = "Frequency")
+thy1.threshold <- 1
+
+neighborhood.bcs <- names(DE.THY1[DE.THY1 > thy1.threshold])
+
+nei.thy1 <- data.frame(
+  name = gene_of_interest,
+  neighborhood = I(list(I(neighborhood.bcs))),
+  n_cells = length(neighborhood.bcs),
+  sel_statistic = NA
+)
+
+# nei <- nei.thy1
 ```
 
 ```{r}
 # target gene CD19 THY1
-target.genes <- c("CD19", "THY1", "NOC2L")
+target.genes <- c("THY1", top_n_markers)
+# target.genes <- c("THY1")
 fit_small <- fit[target.genes,]
+fit_small
 nei_small <- nei %>% filter(name %in% target.genes)
+nei_small
 
 qs::qsave(fit_small, file.path(res.dir.LEMUR, "fit_small.qs"))
 qs::qsave(nei_small, file.path(res.dir.LEMUR, "nei_small.qs"))
