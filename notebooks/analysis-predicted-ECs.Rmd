@@ -1,0 +1,287 @@
+------------------------------------------------------------------------
+
+---
+title: "LEMUR"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(tidyverse)
+
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+# library(dplyr)
+library(Seurat)
+library(png)
+library(glue)
+library(grid)
+library(jsonlite)
+library(magick)
+
+
+
+
+```
+
+```{r}
+source("../src/util.R")
+source("../config/config.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+dir <- get.data.dir()
+dir.data.processed <- file.path(dir, "processed")
+spe <- qread(file.path(dir.data.processed, "spe_clean.qs"))
+spe
+```
+
+```{r}
+res.dir <- get.res.dir()
+
+# model results
+deconProp <- qread(file.path(res.dir, "deconvolution/deconProp_best.qs"))
+use.model <- F
+
+filename <- glue("ECs_manually_marker_final.qs")
+is.ec.spot <- qread(file.path(res.dir, "deconvolution", filename))
+marker.sel <- "VWF & PECAM1"
+
+```
+
+# Plot annotation
+
+## load as seurat
+
+```{r}
+# data_dir <- '/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee'
+# 
+# seurat_spe <- Load10X_Spatial(
+#     data_dir,
+#     filename = "filtered_feature_bc_matrix.h5",
+#     assay = "Spatial",
+#     slice = "slice1",
+#     filter.matrix = TRUE,
+#     to.upper = FALSE,
+#   )
+# 
+# seurat_spe$is.ec.spot <- is.ec.spot$is.ec.spot
+# seurat_spe_subset <- subset(seurat_obj, subset = is.ec.spot == T)
+# seurat_spe_subset@images <- seurat_spe@images
+```
+
+## plot with staining image
+
+```{r}
+# target.cell <- "Endothelial Cells"
+# 
+# method <- paste0("manually annot. by marker ", marker.sel)
+# 
+# # gene_of_interest <- marker.sel
+# gene_of_interest <- "THY1"
+# cluster <- target.cell
+# 
+# groups <- rep("others", ncol(spe))
+# groups[unlist(is.ec.spot)] <- cluster
+# names(groups) <- colnames(spe)
+# seurat_spe$groups <- factor(target.cell)
+# # names(groups)[is.ec.spot]
+# 
+# gcnt <- counts(spe)[gene_of_interest, ]
+# strokes <- ifelse(groups == cluster, 0.5, 0)
+# 
+# plots <- SpatialDimPlot(
+#   seurat_spe,
+#   group.by = "groups",
+#   alpha = 0.8,
+#   stroke = 1,
+#   shape = 24
+# )
+# 
+# filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".svg")
+# ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
+# 
+# filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".png")
+# ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "png", width = 10, height = 8, dpi = 500)
+# 
+# plots
+```
+
+```{r}
+# # Read the image
+# img.path <- file.path(dir, "SHK166_RA_Knee/spatial/tissue_hires_image.png")
+# img <- image_read(img.path)
+# # Rotate the image by -90 degrees
+# img_rotated <- image_rotate(img, -90)
+# 
+# # Get the current dimensions of the image
+# img_info <- image_info(img_rotated)
+# current_width <- img_info$width
+# current_height <- img_info$height
+# 
+# # Resize the image by a factor (e.g., by a factor of 0.5)
+# resize_factor <- imgData(spe)$scaleFactor
+# # resize_factor <-1
+# new_width <- as.integer(current_width / resize_factor)
+# new_height <- as.integer(current_height / resize_factor)
+# 
+# new_width
+# new_height
+# cutoff <- 20
+# 
+# img_resized <- image_resize(img_rotated, geometry_size_pixels(new_width, new_height))
+# # plot(img_resized)
+# # Convert the image to a raster object for ggplot2
+# img_grob <- rasterGrob(img_resized, 
+#                        x = unit(0, "npc"), y = unit(0, "npc"),
+#                        # width = unit(new_width, "native"),
+#                        # height = unit(new_height, "native"), 
+#                        just=c("left", "bottom"))
+# img_grob
+```
+
+## plot THY1 and ECs
+
+```{r}
+target.cell <- "Endothelial Cells"
+
+method <- paste0("manually annot. by marker ", marker.sel)
+
+# gene_of_interest <- marker.sel
+gene_of_interest <- "THY1"
+cluster <- target.cell
+
+groups <- rep("others", ncol(spe))
+groups[unlist(is.ec.spot)] <- cluster
+
+gcnt <- counts(spe)[gene_of_interest, ]
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# Create ggplot object
+plots_ECs <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt, groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups, fill = gcnt)) +
+  # annotation_custom(img_grob, xmin = 0, xmax = Inf, ymin = 0, ymax = Inf) +
+  # xlim(0,new_width) +
+  # ylim(0,new_height) +
+
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+  scale_shape_manual(values = c(24, 21)) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(title = paste0(gene_of_interest, " vs ", "ECs from ", method),
+       x = "pxl_row_in_fullres",
+       y = "pxl_col_in_fullres",
+       fill = paste0(gene_of_interest, " Level"))
+
+plots_ECs
+
+```
+
+```{r}
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs, device = "svg", width = 10, height = 8)
+
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs, device = "png", width = 10, height = 8, dpi = 500)
+```
+
+# UMAP
+
+```{r}
+umap <- reducedDim(spe,"umap_huber")
+```
+
+```{r}
+# Create the ggplot
+plots_umap <- as_tibble(colData(spe)) %>%
+  mutate(UMAP_1 = umap[,1], UMAP_2 = umap[,2]) %>% 
+  ggplot(aes(x = UMAP_1, y = UMAP_2)) +
+  geom_point(aes(color = is.ec.spot), size = 0.75, stroke = 0) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey"), 
+                     labels = c("TRUE" = "EC Spot", "FALSE" = "Non-EC Spot")) +
+  guides(color = guide_legend(override.aes = list(size = 1))) +
+  # theme_minimal() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "EC Spot")
+
+plots_umap
+
+filename <- paste0("ECs in UMAP",  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_umap, device = "svg", width = 10, height = 8)
+```
+
+# Variance
+
+`{{r}`
+
+`# seurat_obj_ecs@active.ident <- factor("ECs Spots") # seurat_obj_ecs@active.ident # DimPlot(seurat_obj_ecs, reduction = 'pca')`
+
+`}`
+
+```{r}
+pca <- reducedDim(spe,"pca_seurat")
+
+# Create the ggplot
+plots_pca <- as_tibble(colData(spe)) %>%
+  mutate(PCA_1 = pca[,1], PCA_2 = pca[,2]) %>% 
+  ggplot(aes(x = PCA_1, y = PCA_2)) +
+  geom_point(aes(color = is.ec.spot), size = 0.75, stroke = 0) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey"), 
+                     labels = c("TRUE" = "EC Spot", "FALSE" = "Non-EC Spot")) +
+  guides(color = guide_legend(override.aes = list(size = 1))) +
+  # theme_minimal() +
+  labs(x = "PCA 1st", y = "PCA 2nd", color = NULL)
+
+plots_pca
+
+filename <- paste0("ECs in PCA",  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_pca, device = "svg", width = 10, height = 8)
+```
+
+# Save plots
+
+```{r}
+combined_plot <- plots_ECs / (plots_pca + plots_umap)
+
+filename <- paste0("pred-ECs-threshold-2",  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = combined_plot, device = "png", width = 15, height = 14, dpi = 800,   bg = "white" # Set background to white
+)
+
+combined_plot
+```
+
+# Misc.
+
+```{r}
+# Example data
+your_data <- data.frame(x = runif(100, 0, new_width), y = runif(100, 0, new_height))
+
+# Create your ggplot
+p <- ggplot(data = your_data, aes(x = x, y = y)) +
+  geom_point() 
+  # xlim(0, new_width) +
+  # ylim(0, new_height)
+
+# Add the background image
+p + annotation_custom(img_grob, xmin = 0, xmax = new_width, ymin = 0, ymax = new_height)
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>

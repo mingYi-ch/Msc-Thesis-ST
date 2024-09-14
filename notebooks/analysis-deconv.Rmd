@@ -11,7 +11,6 @@ output.width: "75%"
 ```{r}
 library(Matrix)
 library(ggplot2)
-library(gghighlight)
 library(tidyverse)
 library(dplyr)
 library(patchwork)
@@ -66,8 +65,8 @@ ref.counts.all <- t(counts(ref)) # ctype x gene
 
 ```{r}
 target.cell <- "SynFib" 
-target.cell <- "Endothelial Cells"
 target.cell <- "Plasma Cells"
+target.cell <- "Endothelial Cells"
 ```
 
 ## STD-poisson
@@ -92,10 +91,22 @@ ref.counts <- ref.counts.all[ , genes.sel]
 dim(ref.counts)
 mean.na.rm <- partial(mean, na.rm = TRUE)
 rownames(ref.counts) <- ctypes
+
+# drop ECs with VWF/pecam1 exceed the range in spatial data
+marker.1 <- 'VWF'
+marker.2 <- 'PECAM1'
+marker.1.max <- max(counts(spe)[marker.1,])
+marker.2.max <- max(counts(spe)[marker.2,])
+marker.1.max
+
 ref.counts <- as.matrix(ref.counts) %>%
             as.data.frame() %>%
-            mutate(ctypes = ctypes)
-  
+            mutate(ctypes = ctypes) %>% 
+            filter(!(!!sym(marker.1) > marker.1.max & ctypes == "Endothelial Cells"))
+
+"PECAM1" %in% colnames(ref.counts)
+dim(ref.counts)
+
 ref.gexp <- aggregate(.~ ctypes, data = ref.counts, FUN = mean.na.rm) %>% as.matrix()
 
 ctypes.unique <- ref.gexp[,1]

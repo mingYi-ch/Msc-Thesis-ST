@@ -5,6 +5,7 @@
 renv
 
 *.png
+*.svg
 *.pdf
 **/data/
 data/

@@ -4,19 +4,19 @@ library(qs)
 source("./src/util.R")
 source("./config/config.R")
 
-# # load data as spatialExperiment object
-# data_dir <- get.std.path()
-# spe <- load.data(data_dir)
-# 
-# cd <- assay(spe, "counts")
-# 
+# load data as spatialExperiment object
+data_dir <- get.std.path()
+spe <- load.data(data_dir)
+
+cd <- assay(spe, "counts")
+
 # # QC: Filter out poor pixels and genes
 # counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 10, verbose = TRUE)
 # 
 # # Select features
-# corpus <- restrictCorpus(counts, 
-#                          removeAbove=0.95, 
-#                          removeBelow = 0.05, 
+# corpus <- restrictCorpus(counts,
+#                          removeAbove=0.95,
+#                          removeBelow = 0.05,
 #                          nTopOD = NA,
 #                          plot = FALSE,
 #                          alpha = 0.1) # 1e-8
@@ -25,8 +25,9 @@ data_dir <- file.path(get.data.dir(), "processed", "spe_subset.qs")
 spe <- qread(data_dir)
 corpus <- counts(spe)
 dim(corpus)
-# ldas <- fitLDA(t(as.matrix(corpus)), Ks = seq(6, 10))
-ldas <- fitLDA(t(as.matrix(corpus)), Ks = c(7))
+
+ldas <- fitLDA(t(as.matrix(corpus)), Ks = seq(5, 10))
+# ldas <- fitLDA(t(as.matrix(corpus)), Ks = c(7))
 
 # # opt.K <- ldas$kneedOptK
 # 

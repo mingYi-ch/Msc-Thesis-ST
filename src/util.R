@@ -1,6 +1,7 @@
 library(SpatialExperiment)
 library(igraph)
 library(ggplot2)
+library(jsonlite)
 
 # add Inf, n + 1 groups
 bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
@@ -91,6 +92,15 @@ load.data  <- function(dir) {
   
   assayNames(spe) <- 'counts'
   
+  # load image
+  scalefactors <- fromJSON(file.path(dir, "spatial/scalefactors_json.json"))
+  img.path <- file.path(dir, "spatial/tissue_hires_image.png")
+  spe <- addImg(spe, 
+                sample_id = "sample01", 
+                image_id = "tissue_hires",
+                imageSource = img.path, 
+                scaleFactor = scalefactors$tissue_hires_scalef, 
+                load = TRUE)
   return(spe)
 }
 

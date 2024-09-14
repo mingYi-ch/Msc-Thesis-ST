@@ -1,5 +1,3 @@
-------------------------------------------------------------------------
-
 ---
 title: "LEMUR"
 output:
@@ -11,26 +9,23 @@ output.width: "75%"
 # Library
 
 ```{r}
-library(Matrix)
+# library(Matrix)
 library(ggplot2)
+# library(gghighlight)
 library(tidyverse)
-library(stringr)
 
+library(STdeconvolve)
 library(SpatialExperiment)
 library(lemur)
 library(igraph)
 library(qs)
 
-# library(dplyr)
+library(dplyr)
 library(Seurat)
 library(png)
 library(glue)
 library(grid)
 library(EBImage)
-library(jsonlite)
-library(magick)
-
-
 
 
 ```
@@ -47,22 +42,181 @@ set.seed(5)
 ```
 
 ```{r}
-dir <- get.data.dir()
-dir.data.processed <- file.path(dir, "processed")
-spe <- qread(file.path(dir.data.processed, "spe_clean.qs"))
+
+# path for local
+data_dir <- '../data'
+
+# path for S3IT
+data_dir <- '/shares/rheumatologie.usz/caroline/spatial'
+biopsy_dirs <- get.dirs(data_dir)
+```
+
+```{r}
+dir <-  biopsy_dirs[["SHK166_RA_Knee"]]
+spe <- load.data(dir)
+spe
 ```
 
 ```{r}
 res.dir <- get.res.dir()
-
 # model results
 deconProp <- qread(file.path(res.dir, "deconvolution/deconProp_best.qs"))
 
-filename <- glue("ECs_manually_marker_final.qs")
-is.ec.spot <- qread(file.path(res.dir, "deconvolution", filename))
+# maually by marker
+
+
+marker.sel <- "VWF"
+threshold <- 3
+filename <- glue("ECs_manually_{marker.sel}_{threshold}.qs")
+is.ec.spot.VWF <- qread(file.path(res.dir, "deconvolution", filename))
+
+
+marker.sel <- "PECAM1"
+threshold <- 3
+filename <- glue("ECs_manually_{marker.sel}_{threshold}.qs")
+is.ec.spot.PECAM1 <- qread(file.path(res.dir, "deconvolution", filename))
+
+# interect of markers annot.
+marker.sel <- "VWF & PECAM1"
+is.ec.spot <- is.ec.spot.PECAM1 & is.ec.spot.VWF
+
+is.ec.spot <- data.frame(is.ec.spot = is.ec.spot)
 
 # wether use the deconvolution model
 use.model <- F
+```
+
+# Plot annotation
+
+## plot with staining image
+
+```{r}
+target.cell <- "Endothelial Cells"
+get.data.dir()
+tissue_image <- readPNG("/data/myi/mt-spatial-transcriptomics/data/SHK166_RA_Knee/spatial/tissue_lowres_image.png")
+
+# Convert the image to an EBImage object
+img_eb <- Image(tissue_image)
+
+# Transpose the image
+img_transposed <- transpose(img_eb)
+
+# Convert back to a matrix
+img_matrix <- as.array(img_transposed)
+g <- rasterGrob(tissue_image, interpolate=TRUE)
+method <- paste0("manually annot. by marker ", marker.sel)
+
+# gene_of_interest <- marker.sel
+gene_of_interest <- "THY1"
+cluster <- target.cell
+  
+groups <- rep("others", ncol(spe))
+groups[unlist(is.ec.spot)] <- cluster
+
+gcnt <- counts(spe)[gene_of_interest, ]
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# Create ggplot object
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt, groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups)) +
+    annotation_custom(g, xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf) +
+
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+  scale_shape_manual(values = c(24, 21)) +
+  # scale_fill_gradient(low = "white", high = "red") +
+  labs(title = paste0(gene_of_interest, " vs ", "ECs from ", method),
+       x = "pxl_row_in_fullres",
+       y = "pxl_col_in_fullres",
+       fill = paste0(gene_of_interest, " Level"))
+
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
+
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "png", width = 10, height = 8, dpi = 500)
+
+plots
+```
+
+```{r}
+target.cell <- "Endothelial Cells"
+
+method <- paste0("manually annot. by marker ", marker.sel)
+
+# gene_of_interest <- marker.sel
+gene_of_interest <- "THY1"
+cluster <- target.cell
+  
+groups <- rep("others", ncol(spe))
+groups[unlist(is.ec.spot)] <- cluster
+
+gcnt <- counts(spe)[gene_of_interest, ]
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# Create ggplot object
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(gcnt = gcnt, groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups, fill = gcnt)) +
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+  scale_shape_manual(values = c(24, 21)) +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(title = paste0(gene_of_interest, " vs ", "ECs from ", method),
+       x = "pxl_row_in_fullres",
+       y = "pxl_col_in_fullres",
+       fill = paste0(gene_of_interest, " Level"))
+
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
+
+filename <- paste0(gene_of_interest, " vs ", "ECs from ", method,  ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "png", width = 10, height = 8, dpi = 500)
+
+plots
+```
+
+# Variable features
+
+```{r}
+seurat_obj <- CreateSeuratObject(counts = counts(spe)) %>% 
+              NormalizeData(verbose = FALSE) %>%
+              FindVariableFeatures(selection.method = "vst", nfeatures = 2000)
+var.feat <- VariableFeatures(seurat_obj)
+spe_var_feat <- spe[var.feat,]
+```
+
+# UMAP
+
+```{r}
+set.seed(1)
+seurat_obj <- CreateSeuratObject(counts = counts(spe)) %>% 
+              NormalizeData(verbose = FALSE) %>%
+              FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>%
+              ScaleData(verbose = FALSE) %>%
+              RunPCA(features = VariableFeatures(.), npcs = 50, verbose = FALSE) %>%
+              RunUMAP(dims = 1:50)
+
+umap <- Embeddings(seurat_obj, reduction = "umap")
+```
+
+```{r}
+spe$is.ec.spot <-  as.factor(is.ec.spot$is.ec.spot)
+
+# Create the ggplot
+plots <- as_tibble(colData(spe)) %>%
+  mutate(UMAP_1 = umap[,1], UMAP_2 = umap[,2]) %>% 
+  ggplot(aes(x = UMAP_1, y = UMAP_2)) +
+  geom_point(aes(color = is.ec.spot), size = 0.7, stroke = 0) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "grey"), 
+                     labels = c("TRUE" = "EC Spot", "FALSE" = "Non-EC Spot")) +
+  guides(color = guide_legend(override.aes = list(size = 1))) +
+  # theme_minimal() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "EC Spot")
+
+plots
+
+filename <- paste0("ECs in UMAP",  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
 ```
 
 # Define covariate
@@ -91,7 +245,7 @@ if (use.model) {
   weights <- deconProp_target
   
 }else{
-  bc.target <- colnames(spe)[is.ec.spot]
+  bc.target <- colnames(spe)[is.ec.spot$is.ec.spot]
   pos.target <-  pos[bc.target,]
   weights <- rep(1, length(bc.target))
 }
@@ -106,8 +260,14 @@ sum(adjacency.matrix)
 ```{r}
 # build a graph
 g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+igraph::components(g)$no
+
+node_id <- 409
+neighbors_node <- neighbors(g, v = node_id, mode = "all")
+print(neighbors_node)
 
 bc.idxs <- seq_along(pos[ ,1])
+
 target.idxs <- which(rownames(pos) %in% bc.target)
 setdiff(bc.target, colnames(spe)[target.idxs])
 length(target.idxs)
@@ -142,15 +302,7 @@ if (re.run) {
   spe <- qread(file.path(res.dir.LEMUR, "se_dist.qs"))
 }
 
-# remove spots far away from ECs
-dist.cutoff <- 8
-spots.sel <- spe$min.dists <= dist.cutoff
-
-var.genes <- metadata(spe)$var.genes[1:5000]
-# nonvar.genes <- metadata(spe)$nonvar.genes
-# genes.sel <- c(var.genes, nonvar.genes)
-# subset spe
-spe.subset <- spe[var.genes, spots.sel]
+spe
 ```
 
 ## Visualize Dists to targets
@@ -158,27 +310,22 @@ spe.subset <- spe[var.genes, spots.sel]
 ```{r}
 # maually by marker
 cluster <-  "Endothelial Cells"
-marker.sel <- NA
 
 method <- paste0("Manually by marker ", marker.sel)
 
-# set for ECs 
 groups <- rep("others", ncol(spe))
 names(groups) <- colnames(spe)
 groups[bc.target] <- cluster
 min.dists <- spe$min.dists
 strokes <- ifelse(groups == cluster, 0.5, 0)
 
-# set spots for spots futher than 8
-min.dists.sel <-  ifelse(spots.sel, spe$min.dists, NA)
-
 # Create ggplot object
 plots <- as_tibble(spatialCoords(spe)) %>%
-  mutate(min.dists = min.dists.sel, groups = groups, strokes = strokes) %>%
+  mutate(min.dists = spe$min.dists, groups = groups, strokes = strokes) %>%
   ggplot(aes(x = x, y = y, shape = groups, fill = min.dists)) +
   geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
   scale_shape_manual(values = c(24, 21)) +
-  scale_fill_gradient(low = "white", high = "blue", na.value = "grey") +
+  scale_fill_gradient(low = "white", high = "blue") +
   labs(title = paste0("Min.Dists", " to ", "ECs from ", method),
        x = "pxl_row_in_fullres",
        y = "pxl_col_in_fullres",
@@ -234,9 +381,9 @@ identify.groups <- function(x, min_spots = 65) {
   return(groups)
 }
 
-identify.groups(spe.subset$min.dists)
+identify.groups(spe$min.dists)
 
-x_counts <- as.data.frame(table(spe.subset$min.dists))
+x_counts <- as.data.frame(table(spe$min.dists))
 colnames(x_counts) <- c("min.dist", "count")
 
 
@@ -274,53 +421,22 @@ bin.dists3 <- function(x, add_label = TRUE, label_fmt = "%.3f", min_spots){
 
 ```{r}
 # groups <- c(0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.35, 0.6, 1.0)
-# spe.subset$dist.cluster <- bin.dists2(spe.subset$min.dists, groups = groups, label_fmt = "%.3f")
+# spe$dist.cluster <- bin.dists2(spe$min.dists, groups = groups, label_fmt = "%.3f")
 
-min_spots <- 65
-spe.subset$dist.cluster <- bin.dists3(spe.subset$min.dists, label_fmt = "%.f", min_spots = min_spots)
-table(spe.subset$dist.cluster)
-
-# save undropped 
-spe$dist.cluster <- bin.dists3(spe$min.dists, label_fmt = "%.f", min_spots = min_spots)
-qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
+spe$dist.cluster <- bin.dists3(spe$min.dists, label_fmt = "%.f", min_spots = 85)
 table(spe$dist.cluster)
 
 # check dist.cluster is correct
-as_tibble(colData(spe.subset)) %>% group_by(dist.cluster) %>%
+as_tibble(colData(spe)) %>% group_by(dist.cluster) %>%
   filter(dist.cluster == "[1,2)")
 
-```
-
-```{r}
-strsplit("15,Inf", ",")[[1]] %>% as.numeric()
-gsub("[\\[\\]()]", "", "[2,3)")
-str_replace_all("[15,Inf]", "[\\[\\]()]", "")
-                
-# Function to calculate the average distance for each cluster
-calculate.avg.dist <- function(x) {
-  # Remove square brackets and parentheses
-  cleaned_str <- str_replace_all(x, "[\\[\\]()]", "")
-  
-  # Convert the cleaned string to numeric values
-  numeric_values <- strsplit(cleaned_str, ",")[[1]] %>% as.numeric()
-  
-  avg <- mean(numeric_values)
-  if (!is.finite(avg)) {
-    avg <- numeric_values[1]
-  }
-  
-  return(avg)
-}
-
-# Example usage of the function
-calculate.avg.dist("[15,Inf]")
-
-spe.subset$avg.dist <- lapply(as.character(spe.subset$dist.cluster), calculate.avg.dist)
+# save
+qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
 ```
 
 ```{r}
 # Create the bar plot using ggplot2
-plots <- as_tibble(spe.subset$dist.cluster) %>% 
+plots <- as_tibble(spe$dist.cluster) %>% 
   ggplot(aes(x = value)) +
     geom_bar(fill = "skyblue") +
     theme_minimal() +
@@ -339,52 +455,60 @@ plots
 ```
 
 ```{r}
-spe.subset
+spe
+set.seed(1)
+logcounts(spe) <- transformGamPoi::shifted_log_transform(spe)
+umap <- scater::calculateUMAP(spe)
+reducedDim(spe, withDimnames = FALSE) <- umap
+
 ```
 
 ```{r}
 set.seed(1)
 
-fit <- lemur::lemur(spe.subset, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.4)
+# Remove inf
+finite.mask <- is.finite(min.dists)
+min.dists.finite <- min.dists[finite.mask]
+spe.finite <- spe[, finite.mask]
+spe.finite$dist.cluster <- droplevels(spe.finite$dist.cluster)
+table(spe.finite$dist.cluster)
+dim(spe.finite)
+spe <-  spe.finite
 
+fit <- lemur::lemur(spe, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
+
+set.seed(1)
 fit <- lemur::align_harmony(fit)
 ```
 
 ```{r}
-table(spe.subset$dist.cluster)
-bin.levels <- levels(spe.subset$dist.cluster)
+table(spe$dist.cluster)
+bin.levels <- levels(spe$dist.cluster)
 
 # DE is signed
-idx.1 <- 1
-idx.2 <- length(bin.levels) - 2
+idx.1 <- 2
+idx.2 <- length(bin.levels) - 1
 
 fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[idx.1]) - cond(dist.cluster = bin.levels[idx.2]))
 
 set.seed(1)
 DE <- assay(fit, "DE")
 dim(DE)
-qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
 
 # rownames(fit)
 ```
 
 ```{r}
-nei <- lemur::find_de_neighborhoods(fit, 
-                                    group_by = vars(dist.cluster), 
-                                    min_neighborhood_size = 50,
-                                    selection_procedure = "zscore",
-                                    directions  = "contrast",
-                                    make_neighborhoods_consistent = F,
-                                    test_method = "none") # test diff between in/outside neibourhood
+# gene_of_interest <- "THY1"
+# gene_of_interest <- top_n_markers
+# fit <- fit[gene_of_interest, ]
 
-qs::qsave(nei, file.path(res.dir.LEMUR, "nei.qs"))
-nei
+nei <- lemur::find_de_neighborhoods(fit, group_by = vars(dist.cluster), test_method = "none")
 ```
 
 ## Cluster by THY1
 
 ```{r}
-gene_of_interest <- c("THY1", "PSD3")
 gene_of_interest <- "THY1"
 
 DE.THY1 <- assay(fit, "DE")[gene_of_interest,]
@@ -405,14 +529,12 @@ nei.thy1 <- data.frame(
 
 ```{r}
 # target gene  THY1, and postn+ markers
-target.genes <- c("THY1", "PSD3")
+target.genes <- c("THY1", top_n_markers)
 
 fit_small <- fit[target.genes,]
 fit_small
- 
 nei_small <- nei %>% filter(name %in% target.genes)
-nei_small["FNDC1", "neighborhood"] <- nei.thy1$neighborhood
-nei_small["PSD3", "neighborhood"] <- nei.thy1$neighborhood
+nei_small
 
 qs::qsave(fit_small, file.path(res.dir.LEMUR, "fit_small.qs"))
 qs::qsave(nei_small, file.path(res.dir.LEMUR, "nei_small.qs"))
@@ -420,9 +542,6 @@ qs::qsave(nei_small, file.path(res.dir.LEMUR, "nei_small.qs"))
 ```
 
 # Misc.
-
-```         
-```
 
 # Reference
 

@@ -104,17 +104,6 @@ logcounts(sce) <- transformGamPoi::shifted_log_transform(sce)
 ## UMAP
 
 ```{r}
-# seurat.obj <- CreateSeuratObject(counts = counts(sce), min.cells = 5, meta.data = as.data.frame(colData(sce))) %>%
-#     Seurat::NormalizeData(verbose = FALSE) %>%
-#     FindVariableFeatures(selection.method = "vst", nfeatures = 2000) %>% 
-#     ScaleData(verbose = FALSE) %>% 
-#     RunPCA(pc.genes = pbmc@var.genes, npcs = 20, verbose = FALSE) %>% 
-#     RunHarmony("samples", plot_convergence = TRUE) %>% 
-#     RunUMAP(reduction = "harmony",  dims = 1:20)
-
-```
-
-```{r}
 umap <- scater::calculateUMAP(logcounts(sce), scale = T)
 reducedDim(sce, "UMAP_scater", withDimnames = FALSE) <- umap
 

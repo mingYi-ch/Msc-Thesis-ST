@@ -11,13 +11,11 @@ output.width: "75%"
 ```{r}
 library(Matrix)
 library(ggplot2)
-library(gghighlight)
 library(tidyverse)
 library(dplyr)
 library(patchwork)
 
 
-library(STdeconvolve)
 library(SpatialExperiment)
 library(lemur)
 library(igraph)
@@ -44,8 +42,10 @@ set.seed(5)
 ```
 
 ```{r}
-dir <-  get.std.path()
-spe <- load.data(dir)
+dir <- get.data.dir()
+dir.data.processed <- file.path(dir, "processed")
+spe <- qread(file.path(dir.data.processed, "spe_clean.qs"))
+
 
 pos <- spatialCoords(spe)
 pos <- pos[, c('x','y')]
@@ -77,13 +77,10 @@ threshold <- 5
 # Endothelial Cells
 target.cell <- "Endothelial Cells"
 
-
-
-marker.sel <- "VWF"
-threshold <- 3
-
 marker.sel <- "PECAM1"
-threshold <- 5
+threshold <- 2
+marker.sel <- "VWF"
+threshold <- 2
 ```
 
 ```{r}
@@ -193,7 +190,7 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_marker_sp_
 is.ec.spot <- (gexp.target > threshold)
 dim(is.ec.spot)
 
-filename <- paste0("ECs_manually_", marker.sel, ".qs")
+filename <- glue("ECs_manually_{marker.sel}_{threshold}.qs")
 qsave(as.data.frame(is.ec.spot), file.path(res.dir, "deconvolution", filename))
 plots_marker_sp_bar
 ```
@@ -232,10 +229,10 @@ plots
 # Plot annotation
 
 ```{r}
-method <- paste0("Manually by marker ", marker.sel)
+method <- paste0("manually annot. by marker ", marker.sel)
 
-gene_of_interest <- "THY1"
 gene_of_interest <- marker.sel
+gene_of_interest <- "THY1"
 cluster <- target.cell
   
 groups <- rep("others", ncol(spe))
@@ -265,33 +262,35 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = 
 plots
 ```
 
+# Save final annotation
+
+```{r}
+res.dir <- get.res.dir()
+
+# maually by marker
+marker.sel <- "VWF"
+threshold <- 2
+filename <- glue("ECs_manually_{marker.sel}_{threshold}.qs")
+is.ec.spot.VWF <- qread(file.path(res.dir, "deconvolution", filename))
+
+
+marker.sel <- "PECAM1"
+threshold <- 2
+filename <- glue("ECs_manually_{marker.sel}_{threshold}.qs")
+is.ec.spot.PECAM1 <- qread(file.path(res.dir, "deconvolution", filename))
+
+# interect of markers annot.
+marker.sel <- "VWF & PECAM1"
+is.ec.spot <- is.ec.spot.PECAM1 & is.ec.spot.VWF
+# save 
+filename <- glue("ECs_manually_marker_final.qs")
+qsave(is.ec.spot, file.path(res.dir, "deconvolution", filename))
+
+```
+
 # Utils
 
 # Misc
-
-```{r}
-library(boot)
-
-# Example data
-data <- c(5, 10, 15, 20, 25)
-
-# Function to compute the mean
-mean_function <- function(data, indices) {
-  # message(length(indices))
-  # return(mean(data[indices]))
-  return(data[indices])
-}
-
-# Perform bootstrap with R = 1000
-set.seed(123)  # For reproducibility
-boot_results <- boot(data = data, statistic = mean_function, R = 1000)
-
-boot_results$t
-# View the results
-print(boot_results)
-plot(boot_results)
-
-```
 
 # Reference
 
