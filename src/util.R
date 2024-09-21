@@ -3,6 +3,23 @@ library(igraph)
 library(ggplot2)
 library(jsonlite)
 
+# Function to calculate the average distance for each cluster
+calculate.avg.dist <- function(x) {
+  # Remove square brackets and parentheses
+  cleaned_str <- str_replace_all(x, "[\\[\\]()]", "")
+  
+  # Convert the cleaned string to numeric values
+  numeric_values <- strsplit(cleaned_str, ",")[[1]] %>% as.numeric()
+  
+  avg <- mean(numeric_values)
+  if (!is.finite(avg)) {
+    avg <- numeric_values[1]
+  }
+  
+  return(avg)
+}
+
+
 # add Inf, n + 1 groups
 bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
   groups <- seq(from, to, length.out = n+1)
