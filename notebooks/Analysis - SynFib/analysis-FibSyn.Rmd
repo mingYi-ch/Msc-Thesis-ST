@@ -9,7 +9,6 @@ library(tidyverse)
 library(SingleCellExperiment)
 library(lemur)
 library(SpatialExperiment)
-# library(gghighlight)
 library(patchwork)
 
 library(boot)
@@ -23,8 +22,8 @@ library(splines)
 ```
 
 ```{r}
-source("../src/util.R")
-source("../config/config.R")
+source("../../src/util.R")
+source("../../config/config.R")
 ```
 
 # Load data
@@ -75,26 +74,25 @@ sum(pvals < 0.05, na.rm = T)
 # Analysis
 
 ```{r}
-markers.postn <- c("FNDC1", "PSD3", "THY1")
+marker.genes <- qread(file.path(res.dir, "markers.qs"))
+markers.SynFib <- marker.genes %>% 
+              filter(cluster == "SynFib") %>%
+              filter(pct.1 > 0.25 & pct.2 >= 0 & avg_log2FC >= 0.5) %>%  # Marlia
+              top_n(n = 200, wt = avg_log2FC) %>% 
+              pull(gene)
 
-nei <- nei_all
-dim(nei)
-gene_of_interest <- markers.postn[3]
-gene_of_interest <- markers.postn[2]
-gene_of_interest <- markers.postn[1]
-gene_of_interest <- nei$name[1] 
-gene_of_interest <- "QDPR"
-gene_of_interest <- "HIST1H4H"
-gene_of_interest <- "FAM221A"
-gene_of_interest <- "IL18BP"
-gene_of_interest <- "QDPR"
+"THY1" %in% markers.SynFib
+```
+
+```{r}
+nei <- nei_all %>% filter(name %in% markers.SynFib)
+idx <- nei$sel_statistic %>% which.min()
+nei$name[idx]
+
+gene_of_interest <- markers.SynFib %>% sample(1)
+gene_of_interest <- markers.SynFib[1]
 gene_of_interest <- "THY1"
-gene_of_interest <- "IGHG1"
 gene_of_interest <- "PRG4"
-
-# nei
-# P.Val <- filter(diffExprs, genes == gene_of_interest)$P.Value
-# adj.P.Val <- filter(diffExprs, genes == gene_of_interest)$adj.P.Val
 
 P.Val <- NA
 if (gene_of_interest %in% names(pvals) ) {
@@ -103,12 +101,6 @@ if (gene_of_interest %in% names(pvals) ) {
 }
 
 stat <- "mean"
-
-```
-
-```{r}
-head(nei)
-nei %>% filter(name %in% c() ) %>% head()
 ```
 
 ## Dist plot of all pixels
@@ -313,7 +305,7 @@ y_max <- max(comparison_data$expr)
 y_expansion <- 0.6
 
 # degree of freedom of natural cubic spline 
-df <- 6
+df <- 3
 
 expr_comparison_pl <- as_tibble(comparison_data) %>%
   mutate(avg.dist = as.factor(comparison_data$avg.dist), origin = as.factor(comparison_data$origin)) %>% 
@@ -481,11 +473,20 @@ gene_of_interest
 method <- paste0("Manually by marker ", marker.sel)
 
 # indicate if a spot is inside the neighborhood
-inside <- rep(FALSE, ncol(spe))
+inside <- rep("excluded", ncol(spe))
 names(inside) <- colnames(spe)
-inside[is_inside$cell_id] <- is_inside$inside
+nei_id <- is_inside %>% 
+  filter(inside == TRUE) %>% 
+  pull(cell_id)
 
-ncol(spe)
+nonnei_id <- is_inside %>% 
+  filter(inside == FALSE) %>% 
+  pull(cell_id)
+
+inside[nei_id] <- "nei"
+inside[nonnei_id] <- "non-nei"
+inside.factor <- factor(inside, levels = c("nei", "non-nei", "excluded"))
+specified_colors <- c("nei" = "blue", "non-nei" = "lightblue", "excluded" = "lightgrey")
 
 info_of_interest <- "neibourhood spots"
 cluster <- target.cell
@@ -494,19 +495,21 @@ groups <- rep("others", ncol(spe))
 groups[unlist(is.ec.spot)] <- cluster
 
 strokes <- ifelse(groups == cluster, 0.5, 0)
-specified_colors <- c("TRUE" = "black", "FALSE" = "grey")
 
 # Create ggplot object
 plots_ECs_nei <- as_tibble(spatialCoords(spe)) %>%
-  mutate(groups = groups, strokes = strokes, inside = inside) %>%
-  ggplot(aes(x = x, y = y, shape = groups, fill = inside)) +
-  geom_point(aes(stroke = strokes), size = 2, alpha = 0.5, color = "black") +
+  mutate(groups = groups, strokes = strokes, inside.col = inside.factor) %>%
+  ggplot(aes(x = x, y = y)) +
+  geom_point(aes(stroke = strokes, shape = groups, fill = inside.col), size = 2, alpha = 0.5, color = "black") + # here is the border color
   scale_shape_manual(values = c(24, 21)) +
   scale_fill_manual(values = specified_colors) +
-  labs(title = paste0(info_of_interest, " vs ", "ECs from ", method),
+  labs(title = glue("{info_of_interest}  vs ECs from {method} for gene: {gene_of_interest}"),
        x = "pxl_row_in_fullres",
        y = "pxl_col_in_fullres",
-       fill = paste0("Inside Nei."))
+       fill = "spots category by color",
+       shape = "cell type group by shape") + 
+  guides(fill = guide_legend(override.aes = list(shape = 22,
+                                                color = c("blue", "lightblue", "lightgrey")))) 
 
 filename <- paste0(info_of_interest, " vs ", "ECs from ", method,  ".svg")
 ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs_nei, device = "svg", width = 10, height = 8)
@@ -548,21 +551,31 @@ plot
 ## Misc.
 
 ```{r}
-# Example data
+library(ggplot2)
+library(gghighlight)
+
+# Sample data
 data <- data.frame(
-  x = c(1, 2, 3, 4, 5),
-  y = c(2, 4, 6, 8, 10),
-  group = c("A", "A", "B", "B", "B")
+  x = rnorm(100),
+  y = rnorm(100),
+  group1 = sample(c("A", "B"), 100, replace = TRUE),  # First group
+  group2 = sample(c("X", "Y", "Z"), 100, replace = TRUE)  # Second group
 )
 
-# Create the plot
-plot <- ggplot(data, aes(x = x, y = y, color = group)) +
-  geom_line() +
-  labs(color = "Group (p-value = 0.01)") +  # Add p-value to the legend title
-  scale_color_manual(values = c("A" = "blue", "B" = "red")) +
-  theme(legend.title = element_text(face = "bold"))
-
-# Display the plot
-print(plot)
+# Create the plot with gghighlight
+ggplot(data, aes(x = x, y = y, shape = group1, fill = group2)) +
+  geom_point(size = 4, stroke = 1.5, color = "black") +  # Adjust point size and outline color
+  scale_shape_manual(values = c(21, 22)) +  # Shapes for group1
+  scale_fill_manual(values = c("red", "blue", "green")) +  # Fill colors for group2
+  gghighlight(group2 == "Y",  # Highlight points where group2 is "Y"
+              use_direct_label = FALSE, 
+              label_key = group2,
+              unhighlighted_params = list(alpha = 0.3)) +  # Adjust transparency of unhighlighted points
+  theme_minimal() +
+  labs(title = "Scatter Plot with Highlights",
+       x = "X-axis Label",
+       y = "Y-axis Label",
+       shape = "Group 1",
+       fill = "Group 2")
 
 ```

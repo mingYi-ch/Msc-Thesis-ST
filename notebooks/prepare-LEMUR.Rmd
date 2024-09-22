@@ -143,14 +143,17 @@ if (re.run) {
 }
 
 # remove spots far away from ECs
-dist.cutoff <- 8
+dist.cutoff <- 4.5
 spots.sel <- spe$min.dists <= dist.cutoff
 
-var.genes <- metadata(spe)$var.genes[1:5000]
 # nonvar.genes <- metadata(spe)$nonvar.genes
 # genes.sel <- c(var.genes, nonvar.genes)
+
 # subset spe
-spe.subset <- spe[var.genes, spots.sel]
+# var.genes <- metadata(spe)$var.genes[1:5000]
+# spe.subset <- spe[var.genes, spots.sel]
+spe.subset <- spe[, spots.sel]
+
 ```
 
 ## Visualize Dists to targets
@@ -375,8 +378,9 @@ nei <- lemur::find_de_neighborhoods(fit,
                                     selection_procedure = "zscore",
                                     directions  = "contrast",
                                     make_neighborhoods_consistent = F,
+                                    add_diff_in_diff = T,
                                     test_method = "none") # test diff between in/outside neibourhood
-
+fit$test_data
 qs::qsave(nei, file.path(res.dir.LEMUR, "nei.qs"))
 nei
 ```

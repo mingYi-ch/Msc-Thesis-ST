@@ -17,8 +17,6 @@ library(DESeq2)
 library(glue)
 library(qs)
 library(car)
-
-
 ```
 
 ```{r}
@@ -48,11 +46,12 @@ target.cell <- "ECs"
 all.genes <- nei$name
 
 # to get variable genes
-num_genes <- 500
+num_genes <- 1000
 genes_of_interest <- spe@metadata$var.genes %>% sample(num_genes)
-genes_of_interest <- c("THY1")
-# check p-val of nonvar genes
-# genes_of_interest <- c(spe@metadata$nonvar.genes[1:num_genes]) 
+
+if (!"THY1" %in% genes_of_interest) {
+  genes_of_interest <- c(genes_of_interest, "THY1")
+}
 # length(filter(nei, name == genes_of_interest)$neighborhood[[1]])
 ```
 
