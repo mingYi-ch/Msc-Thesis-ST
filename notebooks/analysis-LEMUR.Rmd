@@ -90,7 +90,7 @@ gene_of_interest <- "IL18BP"
 gene_of_interest <- "QDPR"
 gene_of_interest <- "THY1"
 gene_of_interest <- "IGHG1"
-gene_of_interest <- "PRG4"
+gene_of_interest <- "HES4"
 
 # nei
 # P.Val <- filter(diffExprs, genes == gene_of_interest)$P.Value

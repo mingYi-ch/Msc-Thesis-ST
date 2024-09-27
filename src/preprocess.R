@@ -33,7 +33,7 @@ seurat_obj <- CreateSeuratObject(counts = counts) %>%
   NormalizeData(verbose = FALSE) %>%
   FindVariableFeatures(selection.method = "vst", nfeatures = 5000) %>%
   ScaleData(verbose = FALSE) %>%
-  RunPCA(features = VariableFeatures(.), npcs = 50, verbose = FALSE) %>%
+  RunPCA(features = VariableFeatures(.), npcs = 10, verbose = FALSE) %>%
   RunUMAP(dims = 1:50)
 
 umap_seurat <- Embeddings(seurat_obj, reduction = "umap")

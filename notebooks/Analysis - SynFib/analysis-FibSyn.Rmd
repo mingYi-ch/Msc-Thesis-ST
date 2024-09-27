@@ -17,8 +17,6 @@ library(tidyr)
 library(qs) 
 library(glue) 
 library(splines)
-
-
 ```
 
 ```{r}
@@ -91,6 +89,8 @@ nei$name[idx]
 
 gene_of_interest <- markers.SynFib %>% sample(1)
 gene_of_interest <- markers.SynFib[1]
+gene_of_interest <- "COL3A1" #X
+gene_of_interest <- "BGN"
 gene_of_interest <- "THY1"
 gene_of_interest <- "PRG4"
 
@@ -186,9 +186,6 @@ expr_comparison_scatter
 ## Dist Clusters in UMAP
 
 ```{r}
-set.seed(1)
-# umap <- uwot::umap(t(fit$embedding))
-spe
 umap <- reducedDim(spe, "umap_sel")
 ```
 
@@ -224,109 +221,8 @@ p1
 
 ## Correlation plot
 
-### Bootstrap for mean/median
-
 ```{r}
-set.seed(1)
-mask <- matrix(NA, nrow = length(gene_of_interest), ncol = ncol(fit), 
-               dimnames = list(gene_of_interest, colnames(fit)))
-
-mask2 <- matrix(1, nrow = length(gene_of_interest), ncol = ncol(fit), 
-               dimnames = list(gene_of_interest, colnames(fit)))
-
-for(id in gene_of_interest){
-  mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
-  mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
-}
-
-
-sce.pseudo <- SingleCellExperiment(
-  list(inside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask),
-  outside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask2)
-  ),
-  colData = as.data.frame(colData(fit))
-  )
-
-stat_func <- function(data, indices) {
-  if (stat == "mean") {
-    return(mean(data[indices], na.rm = TRUE))
-  }
-  return(median(data[indices], na.rm = TRUE))
-}
-
-# Function to perform bootstrapping and add orig and expr columns
-perform_bootstrapping <- function(origin, expr_label) {
-  tibble(counts = as.data.frame(assay(sce.pseudo, origin)[1,])) %>% 
-    mutate(dist.cluster = sce.pseudo$dist.cluster) %>% 
-    # filter(complete.cases(counts)) %>% 
-    group_by(dist.cluster) %>% 
-    do({
-      data <- .$counts[!is.na(.$counts)]
-      
-      # in case no data to boot
-      if (length(data) == 0) {
-        expr <-  NA; lower <- NA; upper <- NA
-      }else{
-        boot.res <- boot(data, statistic = stat_func, R = 1000)
-        ci <- boot.ci(boot.res, conf = c(0.95), type = c('perc'))
-        expr <-  boot.res$t; lower <- ci$percent[4]; upper <- ci$percent[5]
-      }
-      
-      data.frame(expr = expr, n = nrow(.), lower = lower, upper = upper)
-    }) %>% 
-    ungroup() %>%
-    mutate(origin = origin, symbol = expr_label)
-}
-
-
-# Perform bootstrapping for both "inside" and "outside"
-comparison_data <- bind_rows(
-  perform_bootstrapping("inside", gene_of_interest),
-  perform_bootstrapping("outside", gene_of_interest)
-)
-max(comparison_data$expr)
-```
-
-```{r}
-comparison_data <- tibble(comparison_data) %>%
-  mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>%
-  arrange(dist.cluster)
-
-comparison_data$avg.dist <- lapply(as.character(comparison_data$dist.cluster), calculate.avg.dist) %>% unlist()
-
-```
-
-### correlation plot
-
-```{r}
-# set y limits
-y_min <- min(comparison_data$expr)
-y_max <- max(comparison_data$expr)
-y_expansion <- 0.6
-
-# degree of freedom of natural cubic spline 
-df <- 3
-
-expr_comparison_pl <- as_tibble(comparison_data) %>%
-  mutate(avg.dist = as.factor(comparison_data$avg.dist), origin = as.factor(comparison_data$origin)) %>% 
-  ggplot(aes(x = avg.dist, y = expr)) +
-    geom_point(aes(color = origin), size = 1, alpha = 0) +
-    geom_boxplot(aes(color = origin), width = 0.3, outlier.shape = NA) +  # Add boxplot
-    geom_smooth(aes(color = origin, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.5) +
-    # geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8, alpha = 0.5) +
-    scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "pixels in neighborhood", "outside" = "All other pixels")) +
-    scale_x_discrete(breaks = unique(comparison_data$avg.dist)) +  # Show all x values
-    scale_y_continuous(limits = c(y_min, y_max), expand = expansion(add = y_expansion)) +
-    guides(x = guide_axis(angle = 45)) +
-    theme(axis.title.x = element_blank(), legend.position = "bottom") +
-    labs(color = "", y = "Expression (log transformed)",
-         subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped ", stat))  +
-    theme(plot.subtitle = element_text(size = 7)) +
-    annotate("text", x = Inf, y = Inf, label = glue("P.Val = {P.Val}"), 
-             hjust = 1.1, vjust = 1.5, size = 3) + 
-    guides(color = guide_legend(override.aes = list(linetype = 1, size = 2)))  # Set legend as lines
-
-# Save the plot with rectangular dimensions
+expr_comparison_pl <- lemur_curve_plot(nei, fit,  gene_of_interest, spe, stat_func_mean)
 expr_comparison_pl
 ```
 
@@ -377,7 +273,6 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_
 ```
 
 ```{r, paged.print=FALSE}
-gene_of_interest
 is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
   left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
   mutate(inside = map2(cell_id, neighborhood, \(ref, nei_pixels) ref %in% nei_pixels)) %>%
@@ -466,51 +361,14 @@ rel_plt_2 <- colData(fit) %>%
 rel_plt_2
 ```
 
-#### Plot ECs and neighborhood
+# Plot ECs and neighborhood
 
 ```{r}
-gene_of_interest
-method <- paste0("Manually by marker ", marker.sel)
-
-# indicate if a spot is inside the neighborhood
-inside <- rep("excluded", ncol(spe))
-names(inside) <- colnames(spe)
-nei_id <- is_inside %>% 
-  filter(inside == TRUE) %>% 
-  pull(cell_id)
-
-nonnei_id <- is_inside %>% 
-  filter(inside == FALSE) %>% 
-  pull(cell_id)
-
-inside[nei_id] <- "nei"
-inside[nonnei_id] <- "non-nei"
-inside.factor <- factor(inside, levels = c("nei", "non-nei", "excluded"))
-specified_colors <- c("nei" = "blue", "non-nei" = "lightblue", "excluded" = "lightgrey")
-
-info_of_interest <- "neibourhood spots"
-cluster <- target.cell
+plots_ECs_nei <- lemur_nei_plot(spe, nei, fit, gene_of_interest)
   
-groups <- rep("others", ncol(spe))
-groups[unlist(is.ec.spot)] <- cluster
+```
 
-strokes <- ifelse(groups == cluster, 0.5, 0)
-
-# Create ggplot object
-plots_ECs_nei <- as_tibble(spatialCoords(spe)) %>%
-  mutate(groups = groups, strokes = strokes, inside.col = inside.factor) %>%
-  ggplot(aes(x = x, y = y)) +
-  geom_point(aes(stroke = strokes, shape = groups, fill = inside.col), size = 2, alpha = 0.5, color = "black") + # here is the border color
-  scale_shape_manual(values = c(24, 21)) +
-  scale_fill_manual(values = specified_colors) +
-  labs(title = glue("{info_of_interest}  vs ECs from {method} for gene: {gene_of_interest}"),
-       x = "pxl_row_in_fullres",
-       y = "pxl_col_in_fullres",
-       fill = "spots category by color",
-       shape = "cell type group by shape") + 
-  guides(fill = guide_legend(override.aes = list(shape = 22,
-                                                color = c("blue", "lightblue", "lightgrey")))) 
-
+```{r}
 filename <- paste0(info_of_interest, " vs ", "ECs from ", method,  ".svg")
 ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs_nei, device = "svg", width = 10, height = 8)
 
@@ -521,15 +379,56 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs_nei, d
 plots_ECs_nei
 ```
 
+# Plot T cells and B cells marker
+
+```{r}
+T_marker <- "CD3D"
+B_marker <- "CD19"
+
+T_expr <- spe[T_marker,] %>% logcounts() %>% as.vector() %>% as.numeric()
+B_expr <- spe[B_marker,] %>% logcounts() %>% as.vector() %>% as.numeric()
+avg <- mapply(function(x, y) mean(c(x, y), na.rm = T), T_expr, B_expr)
+names(avg) <- colnames(spe)
+
+size.axis.text <- 8 * 2
+size.axis.title <- 8.5 * 2
+size.axis <- 7 * 2
+
+plots_TB_avg <- as_tibble(spatialCoords(spe)) %>%
+  mutate(avg.expr = avg) %>%
+  ggplot(aes(x = x, y = y)) +
+    geom_point(aes(fill = avg.expr), size = 0.7, alpha = 0.5, shape = 21, stroke = 0.1) + # here is the border color
+    scale_fill_gradient(low = "white", high = "red")  +
+    labs(subtitle = glue("avg expr.of Tcell marker {T_marker} and marker Bcell {B_marker}"),
+         x = "row pixel in full resolution",
+         y = "column pixel in full resolution",
+         fill = glue("avg expr.of {T_marker} and {B_marker}")) + 
+    
+    theme(plot.subtitle = element_text(size = size.axis.title),
+          legend.text = element_text(size = size.axis.text),
+          legend.title = element_text(size = size.axis.text),
+          axis.title.x = element_text(size = size.axis.text),
+          axis.title.y = element_text(size = size.axis.text),
+          axis.text.x = element_text(size = size.axis),  
+          axis.text.y = element_text(size = size.axis),
+          legend.position = "right ") 
+plots_TB_avg
+```
+
+```{r}
+filename <- paste0("plots_TB_avg.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_TB_avg, device = "svg", width = 10, height = 8)
+```
+
 ## Save plot
 
 ```{r}
-plot <- expr_comparison_pl / expr_comparison_violin / rel_plt_2
-filename <- glue("coorelation plot - {gene_of_interest}.png")
-ggsave(filename = file.path(res.dir, "plots", filename), plot = plot, device = "png", width = 10, height = 14, dpi = 800,   bg = "white" # Set background to white
-)
-
-plot
+# plot <- expr_comparison_pl / expr_comparison_violin / rel_plt_2
+# filename <- glue("coorelation plot - {gene_of_interest}.png")
+# ggsave(filename = file.path(res.dir, "plots", filename), plot = plot, device = "png", width = 10, height = 14, dpi = 800,   bg = "white" # Set background to white
+# )
+# 
+# plot
 ```
 
 ```{r}
@@ -549,33 +448,3 @@ plot
 ```
 
 ## Misc.
-
-```{r}
-library(ggplot2)
-library(gghighlight)
-
-# Sample data
-data <- data.frame(
-  x = rnorm(100),
-  y = rnorm(100),
-  group1 = sample(c("A", "B"), 100, replace = TRUE),  # First group
-  group2 = sample(c("X", "Y", "Z"), 100, replace = TRUE)  # Second group
-)
-
-# Create the plot with gghighlight
-ggplot(data, aes(x = x, y = y, shape = group1, fill = group2)) +
-  geom_point(size = 4, stroke = 1.5, color = "black") +  # Adjust point size and outline color
-  scale_shape_manual(values = c(21, 22)) +  # Shapes for group1
-  scale_fill_manual(values = c("red", "blue", "green")) +  # Fill colors for group2
-  gghighlight(group2 == "Y",  # Highlight points where group2 is "Y"
-              use_direct_label = FALSE, 
-              label_key = group2,
-              unhighlighted_params = list(alpha = 0.3)) +  # Adjust transparency of unhighlighted points
-  theme_minimal() +
-  labs(title = "Scatter Plot with Highlights",
-       x = "X-axis Label",
-       y = "Y-axis Label",
-       shape = "Group 1",
-       fill = "Group 2")
-
-```

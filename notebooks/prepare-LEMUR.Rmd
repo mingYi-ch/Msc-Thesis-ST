@@ -348,7 +348,7 @@ spe.subset
 ```{r}
 set.seed(1)
 
-fit <- lemur::lemur(spe.subset, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.4)
+fit <- lemur::lemur(spe.subset, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
 
 fit <- lemur::align_harmony(fit)
 ```
@@ -359,7 +359,7 @@ bin.levels <- levels(spe.subset$dist.cluster)
 
 # DE is signed
 idx.1 <- 1
-idx.2 <- length(bin.levels) - 2
+idx.2 <- length(bin.levels) - 1
 
 fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[idx.1]) - cond(dist.cluster = bin.levels[idx.2]))
 
@@ -374,7 +374,7 @@ qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
 ```{r}
 nei <- lemur::find_de_neighborhoods(fit, 
                                     group_by = vars(dist.cluster), 
-                                    min_neighborhood_size = 50,
+                                    min_neighborhood_size = 20,
                                     selection_procedure = "zscore",
                                     directions  = "contrast",
                                     make_neighborhoods_consistent = F,

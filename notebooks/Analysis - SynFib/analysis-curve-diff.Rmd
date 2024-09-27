@@ -18,7 +18,7 @@ library(glue)
 library(qs)
 library(plotly)
 
-
+library(htmlwidgets)
 ```
 
 ```{r}
@@ -136,7 +136,6 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id) {
     }) %>% 
     ungroup() %>%
     mutate(origin = origin, symbol = gene_id)
-  
   return(res)
 }
 
@@ -152,31 +151,36 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id) {
 # Plot all curves
 
 ```{r}
-rerun.boot <- T
+rerun.boot <- F
+nei.spots <- T
 
-# bootstrap for all selected genes
+# bootstrap for all selected genes and all spots
 if (rerun.boot) {
   expression_data <- list()
   boot.res <- list()
   for(id in genes_of_interest){
     # perform bootstrapping for both "inside" of genes
     res_inside <- perform_bootstrapping("inside", genes_of_interest, id)
+    res_outside <- perform_bootstrapping("outside", genes_of_interest, id)
     
-    expression_data[[id]] <- res_inside$expr
-    boot.res[[id]] <- res_inside
-    # rep(c(id, id_target), each = mid)
+    if (nei.spots) {
+      expression_data[[id]] <- res_inside$expr
+      boot.res[[id]] <- res_inside
+    }else{
+      expression_data[[id]] <- c(res_inside$expr, res_outside$expr)
+      boot.res[[id]] <- rbind(res_inside, res_outside)
+    }
   }
       
-  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}.qs")))
-  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}.qs")))
-  qsave(res_inside, file.path(res.dir, glue("comparison_data_nei_{num_genes}.qs")))
+  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}.qs")))
+  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}.qs")))
 }
 ```
 
 ```{r}
-expression_data <- qread(file.path(res.dir, glue("expression_data_nei_{num_genes}.qs")))
-info <- qread(file.path(res.dir, glue("comparison_data_nei_{num_genes}.qs")))
-boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}.qs")))
+expression_data <- qread(file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}.qs")))
+boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}.qs")))
+info <- boot.res[[1]]
 
 ```
 
@@ -229,7 +233,7 @@ expr_comparison_pl <- tibble(expr = comparison_data) %>%
 ```
 
 ```{r}
-# hover up to hightlight line and gene name
+# # hover up to hightlight line and gene name
 expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
 expr_comparison_pl_interactive
 ```
@@ -257,12 +261,19 @@ avg.dists.unique <- lapply(as.character(boot.res[[1]]$dist.cluster), calculate.a
 x_dist <- avg.dists.unique[2] - avg.dists.unique[1]
 slopes <- (gene_medians_centered[,2] - gene_medians_centered[,1]) / x_dist 
 
-hist_result <- hist(slopes, plot = F)
+hist_result <- hist(slopes, breaks = 20, plot = F)
+hist_result$breaks
+plot(hist_result)
+
 ```
 
 ```{r}
-plot(hist_result)
+slopes_plot <- tibble(slopes = slopes) %>% 
+  ggplot(aes(x = slopes)) + 
+    geom_histogram(bins = 20, fill = "grey", color = "black") +
+    labs(title = "Histogram of slopes", x = "Value", y = "Frequency")
 
+slopes_plot
 # hist_result$breaks
 slope_upper <- 0.2
 slope_lower <- -slope_upper
@@ -276,12 +287,14 @@ genes_flat <- setdiff(names(slopes), c(genes_incr, genes_decr))
 length(genes_flat)
 length(genes_decr)
 length(genes_incr)
+
+genes_decr
 ```
 
 ```{r}
 genes_plot <- genes_flat
-genes_plot <- genes_decr
 genes_plot <- genes_incr
+genes_plot <- genes_decr
 ```
 
 ```{r}
@@ -305,42 +318,263 @@ for (gene in genes_of_interest) {
   mask <- sapply(markers, function(x) gene %in% x ) # sapply simplify res as vector
   markers_to_ctypes[[gene]] <- names(markers)[mask]
 }
-markers_to_ctypes[genes_decr] %>% unlist() %>% unique()
+markers_to_ctypes[genes_plot] %>% unlist() %>% unique()
 ```
 
 ```{r}
+# decide a gene's curve pattern
+assign_pattern <- function(gene) {
+  if (gene %in% genes_decr) {
+    return("decr")
+  }else if (gene %in% genes_incr){
+    return("incr")
+  }else{
+    return("flat")
+  }
+}
+pattern_color <- c("decr" = "blue", "incr" = "lightblue", "flat" = "grey")
+pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
+```
+
+```{r}
+size.axis.text <- 7.5 * 2
+size.axis.title <- 8 * 2
+size.axis <- 7 * 2
+
 expr_comparison_pl <- tibble(expr = comparison_data) %>%
   mutate(avg.dist = as.factor(avg.dists), 
          gene = as.factor(gene_ids), 
+         pattern = sapply(gene,  assign_pattern),
          ctypes = sapply(gene,  function(g) paste(markers_to_ctypes[[g]], collapse = ", ")),
          hover_text = paste0("Gene: ", gene, 
                              "<br>marker.of: ", ctypes)) %>% 
   
-  filter(gene %in% genes_plot) %>% 
+  # filter(gene %in% genes_plot) %>% 
   ggplot(aes(x = avg.dist, y = expr, text = hover_text)) +
     # geom_point(aes(color = gene), size = 1, alpha = 0) +
     # geom_boxplot(aes(color = gene), width = 0.3, outlier.shape = NA) +  # Add boxplot
-    geom_smooth(aes(color = gene, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.13) +
+    geom_smooth(aes(color = pattern, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.13) +
     # geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8, alpha = 0.5) +
-    scale_color_manual(values = rep("grey", length(unique(gene_ids)))) +
+    scale_color_manual(values = pattern_color, labels = pattern_name) +
     scale_x_continuous(breaks = unique(avg.dists), labels = unique(avg.dists)) +  # Ensure all x-axis values are shown
     scale_y_continuous(limits = c(y_min, y_max), expand = expansion(add = y_expansion)) +
-    guides(x = guide_axis(angle = 45)) +
-    theme(legend.position = "none") +
-    labs(color = "", y = "Expression (log transformed)", x = 'average dist./spots',
-         subtitle = paste0("All exprs. vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped "))  +
-    theme(plot.subtitle = element_text(size = 7))
-    # annotate("text", x = Inf, y = Inf, label = glue("P.Val = {P.Val}"), hjust = 1.1, vjust = 1.5, size = 3) +
-    #guides(color = guide_legend(override.aes = list(linetype = 1, size = 2)))  # Set legend as lines
+  
+  
+    labs(
+        x = "avg.dist / spots",
+        y = "Log Expr.",
+        subtitle = paste0("All gene vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped "),
+        color = NULL
+        #color = glue("pattern (absolute slope threshold{slope_upper})")
+          ) +
+    
+    theme(
+        plot.subtitle = element_text(size = size.axis.title),
+        legend.text = element_text(size = size.axis.text),
+        axis.title.x = element_text(size = size.axis.text),
+        axis.title.y = element_text(size = size.axis.text),
+        axis.text.x = element_text(size = size.axis),  
+        axis.text.y = element_text(size = size.axis),
+        legend.position = "bottom") +
+  
+    guides(
+        x = guide_axis(angle = 45),
+        color = guide_legend(override.aes = list(linetype = 1, size = size.axis.text / 2)))  # Set legend as lines
 
+expr_comparison_pl
 # hover up to hightlight line and gene name
 expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
 expr_comparison_pl_interactive
 ```
 
+```{r}
+filename <- paste0("interactive_plot_curves",  ".html")
+filename <- file.path(res.dir, "plots", filename)
+saveWidget(expr_comparison_pl_interactive, filename)
+
+filename <- paste0("plot_all_curves",  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_pl, device = "svg", width = 10, height = 8, dpi = 700)
+```
+
+# Neiberhood spots of genes in UMAP
+
+```{r}
+umap <- reducedDim(spe, "umap_sel")
+# compute centroid (arithmetic mean) for each gene
+centroid <- function(gene, umap, nei){
+  nei.spots <- nei %>% 
+    filter(name == gene) %>% 
+    pull(neighborhood) %>% 
+    unlist()
+  
+  coords <- umap[nei.spots, ]
+  return(c(mean(coords[,1]), mean(coords[,2])))
+}
+
+centroids <- sapply(genes_of_interest, function(g) centroid(g, umap, nei)) %>% 
+  t() %>%
+  as.data.frame() %>% 
+  mutate(pattern = sapply(genes_of_interest, assign_pattern))
+
+colnames(centroids)[1:2] <-  c("x", "y")
+
+size.axis.text <- 7.5 * 2
+size.axis.title <- 8 * 2
+size.axis <- 7 * 2
+```
+
+## 1. cluster decr, incr, flat
+
+```{r}
+# filter
+pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
+pattern_color <- c("decr" = "blue", "incr" = "red", "flat" = "lightgreen")
+
+patterns <- c("decr", "incr","flat")
+target.pattern <- patterns[1:3]
+centroids.subset <- centroids %>% 
+  filter(pattern %in% target.pattern) %>% 
+  mutate(hover_text = rownames(.))
+
+    centroids.subset
+umap_all <- as_tibble(umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) + 
+  geom_point(size = 0.7, stroke = 0, color = "lightgrey") +  # all spots umap
+  geom_point(data = centroids.subset, aes(x = x, y = y, color = pattern, text = hover_text), size = 1, stroke = 0) +  # centroid of genes_of_interest highlight
+  scale_color_manual(values = pattern_color , labels = pattern_name ) +
+  
+  theme(
+        plot.subtitle = element_text(size = size.axis.title),
+        legend.text = element_text(size = size.axis.text),
+        legend.title = element_text(size = size.axis.text),
+        axis.title.x = element_text(size = size.axis.text),
+        axis.title.y = element_text(size = size.axis.text),
+        axis.text.x = element_text(size = size.axis),  
+        axis.text.y = element_text(size = size.axis),
+        legend.position = "bottom") +
+  
+  guides(color = guide_legend(override.aes = list(size = 1.5))) +
+  labs(subtitle = glue("centroids - {target.pattern} - in UMAP"),
+       x = "UMAP 1",
+       y = "UMAP 2")
+
+umap_all
+
+filename <- glue("centroids - All - in UMAP.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_all, device = "svg", width = 10, height = 8, dpi = 700)
+
+umap_all
+# hover up to hightlight line and gene name
+umap_all_interactive <- ggplotly(umap_all, tooltip = "text")
+umap_all_interactive
+```
+
+```{r}
+filename <- paste0("interactive_centroid",  ".html")
+filename <- file.path(res.dir, "plots", filename)
+saveWidget(umap_all_interactive, filename)
+
+```
+
+## 2. cluster in decr
+
+```{r}
+# filter
+pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
+pattern_color_subset <- c("1" = "blue", "2" = "lightblue")
+
+patterns <- c("decr", "incr","flat")
+target.pattern <- patterns[1:1]
+centroids.subset <- centroids %>% filter(pattern %in% target.pattern)
+  
+# k-means
+set.seed(1)  # Set seed for reproducibility
+kmeans_result <- kmeans(centroids.subset[, 1:2], centers = 2, nstart = 20)
+centroids.subset$cluster <- kmeans_result$cluster %>% as.character()
+
+# plot
+umap_decr <- as_tibble(umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) + 
+  geom_point(size = 0.7, stroke = 0, color = "lightgrey") +  # all spots umap
+  geom_point(data = centroids.subset, aes(x = x, y = y, color = cluster), size = 1, stroke = 0) +  # centroid of genes_of_interest highlight
+  scale_color_manual(values = pattern_color_subset , labels = pattern_name ) +
+  
+  theme(
+        plot.subtitle = element_text(size = size.axis.title),
+        legend.text = element_text(size = size.axis.text),
+        legend.title = element_text(size = size.axis.text),
+        axis.title.x = element_text(size = size.axis.text),
+        axis.title.y = element_text(size = size.axis.text),
+        axis.text.x = element_text(size = size.axis),  
+        axis.text.y = element_text(size = size.axis),
+        legend.position = "bottom") +
+  
+  guides(color = guide_legend(override.aes = list(size = 1.5))) +
+  labs(subtitle = glue("Cluster of centroids - {target.pattern} - in UMAP"),
+       x = "UMAP 1",
+       y = "UMAP 2")
+
+umap_decr
+
+filename <- glue("centroids - {target.pattern} - in UMAP.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_decr, device = "svg", width = 10, height = 8, dpi = 700)
+```
+
+```{r}
+gene_decr_1 <- centroids.subset %>% filter(cluster == "1") %>% rownames()
+gene_decr_2 <- centroids.subset %>% filter(cluster == "2") %>% rownames()
+
+gene_flat <- centroids %>% filter(pattern == "flat") %>% rownames()
+gene_incr <- centroids %>% filter(pattern == "incr") %>% rownames()
+
+gene_clusters <- list(
+  "gene_decr_1" = gene_decr_1,
+  "gene_decr_2" = gene_decr_2,
+  "gene_flat" = gene_flat,
+  "gene_incr" = gene_incr
+)
+
+
+qsave(gene_clusters, file.path(res.dir, "gene_clusters.qs"))
+
+gene_decr_cluster <- list("decr_1" = I(gene_decr_1), "decr_2" = I(gene_decr_2))
+gene_decr_cluster
+gene_decr_cluster[["decr_1"]]
+```
+
+```{r}
+for (set_name in names(gene_clusters)) {
+  
+  filename <-  glue("{set_name}_plots.pdf")
+  filepath <- file.path(res.dir, "plots", filename)
+  
+  # Open a PDF device to save the plots
+  pdf(filepath, width = 10, height = 8)
+  genes <- gene_clusters[[set_name]]
+  
+  if (set_name == "gene_flat") {
+    genes <- sample(genes, 30)
+  }
+  
+  for (gene in genes) {
+    correl_plots <- lemur_curve_plot(nei, fit_all,  gene, spe, stat_func_mean)
+    plots_ECs_nei <- lemur_nei_plot(spe, nei, fit_all, gene)
+    
+    # print to pdf device
+    print(correl_plots)
+    print(plots_ECs_nei)
+  }
+  
+  # Close the PDF device
+  dev.off()
+}
+```
+
 # Cluster curves by PCA
 
 ```{r}
+stop("manually interrupt")
+
 pca_result <- prcomp(gene_medians, center = F, scale. = F)
 
 # Get the reduced dimensions (principal components)

@@ -19,6 +19,244 @@ calculate.avg.dist <- function(x) {
   return(avg)
 }
 
+stat_func_mean <- function(data, indices) {
+    return(mean(data[indices], na.rm = TRUE))
+}
+
+stat_func_median <- function(data, indices) {
+    return(median(data[indices], na.rm = TRUE))
+}
+
+# Function to perform bootstrapping and add orig and expr columns
+# perform_bootstrapping_func <- function(origin, gene, sce.pseudo, stat_func) {
+#   tibble(counts = as.data.frame(assay(sce.pseudo, origin)[1,])) %>% 
+#     mutate(dist.cluster = sce.pseudo$dist.cluster) %>% 
+#     # filter(complete.cases(counts)) %>% 
+#     group_by(dist.cluster) %>% 
+#     do({
+#       data <- .$counts[!is.na(.$counts)]
+#       
+#       # in case no data to boot
+#       if (length(data) == 0) {
+#         expr <-  NA; lower <- NA; upper <- NA
+#       }else{
+#         boot.res <- boot(data, statistic = stat_func, R = 1000)
+#         ci <- boot.ci(boot.res, conf = c(0.95), type = c('perc'))
+#         expr <-  boot.res$t; lower <- ci$percent[4]; upper <- ci$percent[5]
+#       }
+#       
+#       data.frame(expr = expr, n = nrow(.), lower = lower, upper = upper)
+#     }) %>% 
+#     ungroup() %>%
+#     mutate(origin = origin, symbol = gene)
+# }
+
+perform_bootstrapping_func <- function(origin, genes_of_interest, sce.pseudo, stat_func) {
+  # # mask for if a spot is in neighborhood
+  # mask <- matrix(NA, nrow = length(genes_of_interest), ncol = ncol(fit_all), 
+  #                dimnames = list(genes_of_interest, colnames(fit_all)))
+  # 
+  # mask2 <- matrix(1, nrow = length(genes_of_interest), ncol = ncol(fit_all), 
+  #                 dimnames = list(genes_of_interest, colnames(fit_all)))
+  # 
+  # for(id in genes_of_interest){
+  #   mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
+  #   mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
+  # }
+  # 
+  # 
+  # # construct two assays: inside and outside
+  # sce.pseudo <- SingleCellExperiment(
+  #   list(inside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask),
+  #        outside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask2)
+  #   ),
+  #   colData = as.data.frame(colData(fit_all))
+  # )
+  
+  res <- tibble(expr = as.data.frame(assay(sce.pseudo, origin)[genes_of_interest,])) %>% 
+    mutate(dist.cluster = sce.pseudo$dist.cluster) %>% 
+    group_by(dist.cluster) %>% 
+    do({
+      cluster <- unique(.$dist.cluster) %>% as.character()
+      R <-  500
+      # remove NA before sampling
+      data <- .$expr[!is.na(.$expr)]
+      
+      # no data in a cluster
+      if (length(data) == 0) {
+        data.frame(
+          expr = rep(0, R), 
+          n = nrow(.), 
+          lower = NA, 
+          upper = NA, 
+          SampleName = rep(glue("{origin}_{genes_of_interest}_{cluster}"), R),
+          dist.cluster.1 = cluster,
+          Replicate = seq(R)
+        )
+      }else{
+        boot.res <- boot(data, statistic = mean_stat, R = R)
+        ci <- boot.ci(boot.res, conf = c(0.95), type = c('perc'))
+        lower <-  ci$percent[4]
+        upper <-  ci$percent[5]
+        
+        if (length(lower) == 0) {
+          lower <-  NA
+          upper <-  NA
+        }
+        data.frame(
+          expr = boot.res$t, 
+          n = nrow(.), 
+          lower = lower, 
+          upper = upper, 
+          SampleName = rep(glue("{origin}_{genes_of_interest}_{cluster}"), R),
+          dist.cluster.1 = cluster,
+          Replicate = seq(R)
+        )
+      }
+    }) %>% 
+    ungroup() %>%
+    mutate(origin = origin, symbol = genes_of_interest)
+  return(res)
+}
+
+lemur_nei_plot <- function(spe, nei, fit, gene_of_interest) {
+  # refactor to a func
+  is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
+    left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
+    mutate(inside = map2(cell_id, neighborhood, \(ref, nei_pixels) ref %in% nei_pixels)) %>%
+    dplyr::select(-neighborhood) %>%
+    unnest(c(inside, cell_id))
+  
+  # indicate if a spot is inside the neighborhood
+  inside <- rep("excluded", ncol(spe))
+  names(inside) <- colnames(spe)
+  nei_id <- is_inside %>% 
+    filter(inside == TRUE) %>% 
+    pull(cell_id)
+  
+  nonnei_id <- is_inside %>% 
+    filter(inside == FALSE) %>% 
+    pull(cell_id)
+  
+  inside[nei_id] <- "nei"
+  inside[nonnei_id] <- "non-nei"
+  inside.factor <- factor(inside, levels = c("nei", "non-nei", "excluded"))
+  specified_colors <- c("nei" = "blue", "non-nei" = "lightblue", "excluded" = "lightgrey")
+  
+  info_of_interest <- "neibourhood spots"
+  cluster <- target.cell
+  
+  groups <- rep("others", ncol(spe))
+  groups[unlist(is.ec.spot)] <- cluster
+  
+  strokes <- ifelse(groups == cluster, 0.5, 0)
+  
+  size.axis.text <- 8 * 2
+  size.axis.title <- 8.5 * 2
+  size.axis <- 7 * 2
+  
+  plots_ECs_nei <- as_tibble(spatialCoords(spe)) %>%
+    mutate(groups = groups, strokes = strokes, inside.col = inside.factor) %>%
+    ggplot(aes(x = x, y = y)) +
+    geom_point(aes(stroke = strokes, shape = groups, fill = inside.col), size = 2, alpha = 0.5, color = "black") + # here is the border color
+    scale_shape_manual(values = c(24, 21)) +
+    scale_fill_manual(values = specified_colors) +
+    labs(subtitle = glue("LEMUR neighborhood clusterfor gene: {gene_of_interest}"),
+         x = "row pixel in full resolution",
+         y = "column pixel in full resolution",
+         fill = "spots category by color: ",
+         shape = "cell type group by shape:") + 
+    
+    theme(plot.subtitle = element_text(size = size.axis.title),
+          legend.text = element_text(size = size.axis.text),
+          legend.title = element_text(size = size.axis.text),
+          axis.title.x = element_text(size = size.axis.text),
+          axis.title.y = element_text(size = size.axis.text),
+          axis.text.x = element_text(size = size.axis),  
+          axis.text.y = element_text(size = size.axis),
+          legend.position = "bottom") +
+    guides(fill = guide_legend(nrow = 2, override.aes = list(shape = 22, color = c("blue", "lightblue", "lightgrey"), size = 5)),
+           shape = guide_legend(nrow = 2, override.aes = list(size = 5))  # Set legend as lines
+    )
+  return(plots_ECs_nei)
+}
+
+# retactor to multiple funcs
+lemur_curve_plot <- function(nei, fit, gene_of_interest, spe, stat_func) {
+  set.seed(1)
+  mask <- matrix(NA, nrow = length(gene_of_interest), ncol = ncol(fit), 
+                 dimnames = list(gene_of_interest, colnames(fit)))
+  
+  mask2 <- matrix(1, nrow = length(gene_of_interest), ncol = ncol(fit), 
+                  dimnames = list(gene_of_interest, colnames(fit)))
+  
+  for(id in gene_of_interest){
+    mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
+    mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
+  }
+  
+  sce.pseudo <- SingleCellExperiment(
+    list(inside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask),
+         outside = as.matrix(logcounts(fit)[gene_of_interest,,drop=FALSE] * mask2)
+    ),
+    colData = as.data.frame(colData(fit))
+  )
+  
+  # Perform bootstrapping for both "inside" and "outside"
+  comparison_data <- bind_rows(
+    perform_bootstrapping_func("inside", gene_of_interest, sce.pseudo, stat_func_mean),
+    perform_bootstrapping_func("outside", gene_of_interest, sce.pseudo, stat_func_mean)
+  )
+  
+  comparison_data <- tibble(comparison_data) %>%
+    mutate(dist.cluster = ordered(dist.cluster, levels = levels(fit$colData$dist.cluster))) %>%
+    arrange(dist.cluster)
+  
+  comparison_data$avg.dist <- lapply(as.character(comparison_data$dist.cluster), calculate.avg.dist) %>% unlist()
+  
+  # plot curves
+  ## set y limits
+  y_min <- min(comparison_data$expr)
+  y_max <- max(comparison_data$expr)
+  y_expansion <- 0.6
+  
+  size.axis.text <- 7.5 * 2
+  size.axis.title <- 8 * 2
+  size.axis <- 7 * 2
+  
+  ## degree of freedom of natural cubic spline 
+  df <- 3
+  
+  expr_comparison_pl <- as_tibble(comparison_data) %>%
+    mutate(avg.dist = as.factor(comparison_data$avg.dist), origin = as.factor(comparison_data$origin)) %>% 
+    ggplot(aes(x = avg.dist, y = expr)) +
+    geom_point(aes(color = origin), size = 1, alpha = 0) +
+    geom_boxplot(aes(color = origin), width = 0.3, outlier.shape = NA) +  # Add boxplot
+    geom_smooth(aes(color = origin, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.5) +
+    # geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8, alpha = 0.5) +
+    scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "spots in neighborhood", "outside" = "All other spots")) +
+    scale_x_discrete(breaks = unique(comparison_data$avg.dist)) +  # Show all x values
+    scale_y_continuous(limits = c(y_min, y_max), expand = expansion(add = y_expansion)) +
+    guides(x = guide_axis(angle = 45)) +
+    
+    labs(color = "",
+         x = "avg.dist / spots",
+         y = "Log Expr.",
+         subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell"))  +
+    
+    theme(plot.subtitle = element_text(size = size.axis.title),
+          legend.text = element_text(size = size.axis.text),
+          axis.title.x = element_text(size = size.axis.text),
+          axis.title.y = element_text(size = size.axis.text),
+          axis.text.x = element_text(size = size.axis),  
+          axis.text.y = element_text(size = size.axis),
+          legend.position = "bottom") +
+    # annotate("text", x = Inf, y = Inf, label = glue("P.Val = {P.Val}"), hjust = 1.1, vjust = 1.5, size = 3) + 
+    guides(color = guide_legend(override.aes = list(linetype = 1, size = 5)))  # Set legend as lines
+  
+  # Save the plot with rectangular dimensions
+  return(expr_comparison_pl)
+}
 
 # add Inf, n + 1 groups
 bin.dists <- function(x, n = 5, from = min(x), to = max(x[is.finite(x)]), add_label = TRUE, label_fmt = "%.2f"){
