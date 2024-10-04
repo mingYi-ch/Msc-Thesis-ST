@@ -48,13 +48,13 @@ set.seed(5)
 
 ```{r}
 dir <- get.data.dir()
+res.dir <- get.res.dir()
+
 dir.data.processed <- file.path(dir, "processed")
 spe <- qread(file.path(dir.data.processed, "spe_clean.qs"))
 ```
 
 ```{r}
-res.dir <- get.res.dir()
-
 # model results
 deconProp <- qread(file.path(res.dir, "deconvolution/deconProp_best.qs"))
 

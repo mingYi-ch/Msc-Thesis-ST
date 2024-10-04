@@ -12,7 +12,7 @@ library(SpatialExperiment)
 library(patchwork)
 
 library(boot)
-library(tidyr) 
+library(tidyr)
 library(splineTimeR)
 library(glue)
 library(qs)
@@ -70,7 +70,15 @@ mean_stat <- function(data, indices) {
 
 # Function to perform bootstrapping and add orig and expr columns
 # TODO : refactor; check samples in each cluster
-perform_bootstrapping <- function(origin, genes_of_interest, gene_id) {
+perform_bootstrapping <- function(origin, genes_of_interest, gene_id, assay = "log") {
+  
+  if (assay == "log") {
+    assay_data <- logcounts(fit_all)
+  }else if (assay == "raw") {
+    assay_data <- counts(fit_all)
+  }else{
+    stop(glue("invalid arguments: {assay} "))
+  }
   
   # mask for if a spot is in neighborhood
   mask <- matrix(NA, nrow = length(genes_of_interest), ncol = ncol(fit_all), 
@@ -84,11 +92,10 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id) {
     mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
   }
 
-
   # construct two assays: inside and outside
   sce.pseudo <- SingleCellExperiment(
-    list(inside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask),
-    outside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask2)
+    list(inside = as.matrix(assay_data[genes_of_interest,,drop=FALSE] * mask),
+    outside = as.matrix(assay_data[genes_of_interest,,drop=FALSE] * mask2)
     ),
     colData = as.data.frame(colData(fit_all))
     )
@@ -152,7 +159,8 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id) {
 
 ```{r}
 rerun.boot <- F
-nei.spots <- T
+nei.spots <- F
+assay <- "raw"
 
 # bootstrap for all selected genes and all spots
 if (rerun.boot) {
@@ -160,8 +168,8 @@ if (rerun.boot) {
   boot.res <- list()
   for(id in genes_of_interest){
     # perform bootstrapping for both "inside" of genes
-    res_inside <- perform_bootstrapping("inside", genes_of_interest, id)
-    res_outside <- perform_bootstrapping("outside", genes_of_interest, id)
+    res_inside <- perform_bootstrapping("inside", genes_of_interest, id, assay)
+    res_outside <- perform_bootstrapping("outside", genes_of_interest, id, assay)
     
     if (nei.spots) {
       expression_data[[id]] <- res_inside$expr
@@ -172,14 +180,14 @@ if (rerun.boot) {
     }
   }
       
-  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}.qs")))
-  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}.qs")))
+  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 }
 ```
 
 ```{r}
-expression_data <- qread(file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}.qs")))
-boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}.qs")))
+expression_data <- qread(file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 info <- boot.res[[1]]
 
 ```
@@ -570,6 +578,131 @@ for (set_name in names(gene_clusters)) {
 }
 ```
 
+# Cluster curves by centroids
+
+```{r}
+# filter
+pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
+# pattern_color_subset <- c("1" = "blue", "2" = "lightblue")
+
+patterns <- c("decr", "incr","flat")
+# target.pattern <- patterns[1:3]
+# centroids.subset <- centroids %>% filter(pattern %in% target.pattern)
+centroids.subset <- centroids
+  
+# k-means
+set.seed(1)  # Set seed for reproducibility
+K <- 4
+kmeans_result <- kmeans(centroids.subset[, 1:2], centers = K, nstart = 20)
+centroids.subset$cluster <- kmeans_result$cluster %>% as.character()
+
+# plot
+umap_decr <- as_tibble(umap) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) + 
+  geom_point(size = 0.7, stroke = 0, color = "lightgrey") +  # all spots umap
+  geom_point(data = centroids.subset, aes(x = x, y = y, color = cluster), size = 1, stroke = 0) +  # centroid of genes_of_interest highlight
+  # scale_color_manual(values = pattern_color_subset , labels = pattern_name ) +
+  
+  theme(
+        plot.subtitle = element_text(size = size.axis.title),
+        legend.text = element_text(size = size.axis.text),
+        legend.title = element_text(size = size.axis.text),
+        axis.title.x = element_text(size = size.axis.text),
+        axis.title.y = element_text(size = size.axis.text),
+        axis.text.x = element_text(size = size.axis),  
+        axis.text.y = element_text(size = size.axis),
+        legend.position = "bottom") +
+  
+  guides(color = guide_legend(override.aes = list(size = 2))) +
+  labs(subtitle = glue("Cluster of centroids - ALL - in UMAP"),
+       x = "UMAP 1",
+       y = "UMAP 2")
+
+umap_decr
+
+filename <- glue("centroids - KMeans - in UMAP.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_decr, device = "svg", width = 10, height = 8, dpi = 700)
+```
+
+```{r}
+clusters <- centroids.subset$cluster
+names(clusters) <- rownames(centroids.subset)
+genes.all <- rownames(centroids.subset)
+
+for (k in seq(K)) {
+  filename <-  glue("{k}_plots.pdf")
+  filepath <- file.path(res.dir, "plots", filename)
+  
+  # Open a PDF device to save the plots
+  pdf(filepath, width = 10, height = 8)
+  genes <- genes.all[which(clusters == as.character(k))]
+  
+  if (k == "2") {
+    genes <- sample(genes, 30)
+  }
+  
+  for (gene in genes) {
+    correl_plots <- lemur_curve_plot(nei, fit_all,  gene, spe, stat_func_mean)
+    plots_ECs_nei <- lemur_nei_plot(spe, nei, fit_all, gene)
+    
+    # print to pdf device
+    print(correl_plots)
+    print(plots_ECs_nei)
+  }
+  
+  # Close the PDF device
+  dev.off()
+}
+```
+
+# Gene LogFC for each cluster
+
+```{r}
+# extract median, non log expr
+extract_median_both <- function(res, genes.syn = genes.all) {
+  medians <- as_tibble(res_count) %>% 
+    filter(symbol %in% genes.syn) %>% 
+    group_by(origin, dist.cluster, symbol) %>% 
+    summarize(median_expr = median(expr, na.rm = TRUE), .groups = "drop") 
+  return(medians)
+}
+
+extract_median_both(boot.res[[1]])
+
+gene_medians_both <- lapply(boot.res, extract_median_both) %>% do.call(rbind, .)
+
+head(gene_medians_both)
+
+```
+
+```{r}
+# calculate logFC use medians of inside and outside for each gene
+cal.logFC <-  function(gexp) {
+  logFC <- as_tibble(gexp) %>% 
+    group_by(symbol, dist.cluster) %>% 
+    summarize(logFC = log2(inside/outside), .groups = "drop") 
+  return(logFC)
+}
+
+logFC <- cal.logFC(gene_medians_both)
+
+# compute third/max quantile of the logFC for each gene
+quantile <- 0.75
+logFC_quantile <- as_tibble(logFC) %>% 
+  group_by(symbol) %>% 
+  summarize(logFC = quantile(logFC, probs = quantile), .groups = "drop") 
+
+markers_cluster <- as_tibble(logFC_quantile) %>% 
+  group_by(cluster) %>% 
+  top_n(.,10,wt = logFC) 
+
+```
+
+```{r}
+# plot markers
+
+```
+
 # Cluster curves by PCA
 
 ```{r}
@@ -588,7 +721,7 @@ pca_reduced <- pca_result$x
 id_target <- "THY1"
 
 if (rerun.boot) {
-  res_outside <- perform_bootstrapping("inside", genes_of_interest, id_target)
+  res_outside <- perform_bootstrapping("outside", genes_of_interest, id_target)
   mid <- nrow(comparison_data) / 2
   
   expression_data <- list()
