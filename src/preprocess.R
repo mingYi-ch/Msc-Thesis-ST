@@ -18,14 +18,17 @@ cd <- assay(spe, "counts")
 dim(cd)
 
 # QC: Filter out poor pixels and genes
-counts <- cleanCounts(cd, min.lib.size = 1, min.reads = 1, verbose = TRUE)
-spe.clean <- spe[,colnames(counts)]
-
+counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 1, verbose = TRUE)
+spe.clean <- spe[rownames(counts),colnames(counts)]
+dim(spe.clean)
 # compute colsums to check lib size
 spe.clean$lib.size <- colSums(counts(spe.clean))
 
 # sum(lib.size <= 100)
-hist(spe.clean$lib.size, breaks = 200)
+hist <- hist(spe.clean$lib.size, breaks = 200)
+hist$breaks
+hist$counts
+plot(spatialCoords(spe.clean), cex = 0.3)
 
 # compute umap and  PCA reductions
 ## seurat
@@ -33,8 +36,34 @@ seurat_obj <- CreateSeuratObject(counts = counts) %>%
   NormalizeData(verbose = FALSE) %>%
   FindVariableFeatures(selection.method = "vst", nfeatures = 5000) %>%
   ScaleData(verbose = FALSE) %>%
-  RunPCA(features = VariableFeatures(.), npcs = 10, verbose = FALSE) %>%
-  RunUMAP(dims = 1:50)
+  RunPCA(features = VariableFeatures(.), npcs = 50, verbose = FALSE) %>%
+  RunUMAP(dims = 1:10)
+
+
+## scree plot seurat
+data.pca <- GetAssayData(seurat_obj[VariableFeatures(seurat_obj),], slot = "data")
+dim(data.pca)
+#perform PCA
+results <- prcomp(data.pca, scale = T, center = T)
+# screeplot(results, type = "lines", main = "Scree Plot")
+#calculate total variance explained by each principal component
+var_explained <-  results$sdev^2 / sum(results$sdev^2)
+
+#create scree plot
+n_pc <- 50
+df <- data.frame(
+  PC = 1:n_pc,               
+  var_prop = var_explained[1:n_pc]
+)
+
+# Plot using ggplot
+ggplot(df, aes(x = PC, y = var_prop)) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  ylim(0, 1)  # Set y-axis limits between 0 and 1
+
 
 umap_seurat <- Embeddings(seurat_obj, reduction = "umap")
 pca_seurat <- Embeddings(seurat_obj, reduction = "pca")
@@ -44,6 +73,27 @@ reducedDim(spe.clean, "pca_seurat") <- pca_seurat
 
 ## Huber paper method
 logcounts(spe.clean) <- transformGamPoi::shifted_log_transform(spe.clean)
+data.pca <- logcounts(spe.clean)
+#perform PCA
+results <- prcomp(data.pca, scale = T, center = T)
+#calculate total variance explained by each principal component
+var_explained <-  results$sdev^2 / sum(results$sdev^2)
+
+#create scree plot
+n_pc <- 500
+df <- data.frame(
+  PC = 1:n_pc,               
+  var_prop = var_explained[1:n_pc]
+)
+
+# Plot using ggplot
+ggplot(df, aes(x = PC, y = var_prop)) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  ylim(0, 1)  # Set y-axis limits between 0 and 1
+
 umap_huber <- scater::calculateUMAP(spe.clean, pca = 10)
 
 reducedDim(spe.clean, "umap_huber", withDimnames = FALSE) <- umap_huber

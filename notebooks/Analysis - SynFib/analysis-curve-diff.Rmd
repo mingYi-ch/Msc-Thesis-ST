@@ -550,7 +550,8 @@ gene_decr_cluster
 gene_decr_cluster[["decr_1"]]
 ```
 
-```{r}
+```{r, eval=FALSE}
+
 for (set_name in names(gene_clusters)) {
   
   filename <-  glue("{set_name}_plots.pdf")
@@ -627,15 +628,77 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_decr, devic
 ```{r}
 clusters <- centroids.subset$cluster
 names(clusters) <- rownames(centroids.subset)
-genes.all <- rownames(centroids.subset)
+genes.syn <- rownames(centroids.subset)
+```
 
+# Gene LogFC for each cluster
+
+```{r}
+# extract median, non log expr
+extract_median_both <- function(res, genes) {
+  medians <- as_tibble(res) %>% 
+    filter(symbol %in% genes) %>% 
+    group_by(origin, dist.cluster, symbol) %>% 
+    summarize(median_expr = median(expr, na.rm = TRUE), .groups = "drop") 
+  return(medians)
+}
+
+extract_median_both(boot.res[[1]], genes.syn)
+
+gene_medians_both <- lapply(boot.res, function(x) extract_median_both(x, genes.syn)) %>% do.call(rbind, .)
+
+gene_medians_both
+
+```
+
+```{r}
+# calculate logFC use medians of inside and outside for each gene
+cal.logFC <-  function(gexp) {
+  logFC <- as_tibble(gexp) %>% 
+    group_by(symbol, dist.cluster) %>% 
+    do({
+      sub.df <- .
+      
+      in.expr <- filter(sub.df, origin == "inside")$median_expr
+      out.expr <- filter(sub.df, origin == "outside")$median_expr
+      sub.logFC <-  log2(in.expr/out.expr)
+      
+      data.frame(logFC = sub.logFC)
+    })
+  return(logFC)
+}
+
+logFC <- cal.logFC(gene_medians_both)
+
+logFC
+
+# compute third/max quantile of the logFC for each gene
+quantile <- 0.75
+logFC_quantile <- as_tibble(logFC) %>% 
+  group_by(symbol) %>% 
+  summarize(logFC = quantile(logFC, probs = quantile, na.rm = T), .groups = "drop") 
+
+cluster.order <- clusters[logFC_quantile$symbol]
+logFC_quantile$cluster <- cluster.order
+
+markers_cluster <- as_tibble(logFC_quantile) %>% 
+  group_by(cluster) %>% 
+  top_n(., 15, wt = logFC) 
+
+markers_cluster %>% filter(cluster == "4")
+
+logFC_quantile %>% filter(symbol == "IGFBP5")
+```
+
+```{r}
+# plot markers
 for (k in seq(K)) {
-  filename <-  glue("{k}_plots.pdf")
+  filename <-  glue("cluster_{k}_plots.pdf")
   filepath <- file.path(res.dir, "plots", filename)
   
   # Open a PDF device to save the plots
   pdf(filepath, width = 10, height = 8)
-  genes <- genes.all[which(clusters == as.character(k))]
+  genes <- genes.syn[which(clusters == as.character(k))]
   
   if (k == "2") {
     genes <- sample(genes, 30)
@@ -653,53 +716,6 @@ for (k in seq(K)) {
   # Close the PDF device
   dev.off()
 }
-```
-
-# Gene LogFC for each cluster
-
-```{r}
-# extract median, non log expr
-extract_median_both <- function(res, genes.syn = genes.all) {
-  medians <- as_tibble(res_count) %>% 
-    filter(symbol %in% genes.syn) %>% 
-    group_by(origin, dist.cluster, symbol) %>% 
-    summarize(median_expr = median(expr, na.rm = TRUE), .groups = "drop") 
-  return(medians)
-}
-
-extract_median_both(boot.res[[1]])
-
-gene_medians_both <- lapply(boot.res, extract_median_both) %>% do.call(rbind, .)
-
-head(gene_medians_both)
-
-```
-
-```{r}
-# calculate logFC use medians of inside and outside for each gene
-cal.logFC <-  function(gexp) {
-  logFC <- as_tibble(gexp) %>% 
-    group_by(symbol, dist.cluster) %>% 
-    summarize(logFC = log2(inside/outside), .groups = "drop") 
-  return(logFC)
-}
-
-logFC <- cal.logFC(gene_medians_both)
-
-# compute third/max quantile of the logFC for each gene
-quantile <- 0.75
-logFC_quantile <- as_tibble(logFC) %>% 
-  group_by(symbol) %>% 
-  summarize(logFC = quantile(logFC, probs = quantile), .groups = "drop") 
-
-markers_cluster <- as_tibble(logFC_quantile) %>% 
-  group_by(cluster) %>% 
-  top_n(.,10,wt = logFC) 
-
-```
-
-```{r}
-# plot markers
 
 ```
 
