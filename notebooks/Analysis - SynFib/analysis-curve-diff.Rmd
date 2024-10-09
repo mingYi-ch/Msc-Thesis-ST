@@ -159,8 +159,8 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id, assay = "l
 
 ```{r}
 rerun.boot <- F
-nei.spots <- F
-assay <- "raw"
+nei.spots <- T
+assay <- "log"
 
 # bootstrap for all selected genes and all spots
 if (rerun.boot) {
@@ -207,7 +207,7 @@ avg.dists <- lapply(as.character(info$dist.cluster), calculate.avg.dist) %>%
   unlist()
 
 # concatenate the lists to one list
-comparison_data <- do.call(c, expression_data_shifted)
+comparison_data <- do.call("c", expression_data_shifted)
 
 # set y limits
 y_min <- min(comparison_data)
@@ -283,7 +283,7 @@ slopes_plot <- tibble(slopes = slopes) %>%
 
 slopes_plot
 # hist_result$breaks
-slope_upper <- 0.2
+slope_upper <- 1
 slope_lower <- -slope_upper
 ```
 
@@ -634,6 +634,9 @@ genes.syn <- rownames(centroids.subset)
 # Gene LogFC for each cluster
 
 ```{r}
+assay <- "raw"
+boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+
 # extract median, non log expr
 extract_median_both <- function(res, genes) {
   medians <- as_tibble(res) %>% 
@@ -670,7 +673,7 @@ cal.logFC <-  function(gexp) {
 
 logFC <- cal.logFC(gene_medians_both)
 
-logFC
+# logFC
 
 # compute third/max quantile of the logFC for each gene
 quantile <- 0.75
@@ -683,10 +686,15 @@ logFC_quantile$cluster <- cluster.order
 
 markers_cluster <- as_tibble(logFC_quantile) %>% 
   group_by(cluster) %>% 
-  top_n(., 15, wt = logFC) 
+  top_n(., 10, wt = logFC) 
 
-markers_cluster %>% filter(cluster == "4")
+for (c in seq(4)) {
+  print(markers_cluster %>% filter(cluster == as.character(c)))
+}
 
+```
+
+```{r}
 logFC_quantile %>% filter(symbol == "IGFBP5")
 ```
 

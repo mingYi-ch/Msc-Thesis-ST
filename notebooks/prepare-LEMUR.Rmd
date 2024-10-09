@@ -372,9 +372,10 @@ qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
 ```
 
 ```{r}
+set.seed(1)
 nei <- lemur::find_de_neighborhoods(fit, 
                                     group_by = vars(dist.cluster), 
-                                    min_neighborhood_size = 20,
+                                    min_neighborhood_size = 10,
                                     selection_procedure = "zscore",
                                     directions  = "contrast",
                                     make_neighborhoods_consistent = F,
@@ -382,7 +383,8 @@ nei <- lemur::find_de_neighborhoods(fit,
                                     test_method = "none") # test diff between in/outside neibourhood
 fit$test_data
 qs::qsave(nei, file.path(res.dir.LEMUR, "nei.qs"))
-nei
+filter(nei, name == "PRG4")
+
 ```
 
 ## Cluster by THY1
