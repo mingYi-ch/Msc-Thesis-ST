@@ -18,9 +18,9 @@ cd <- assay(spe, "counts")
 dim(cd)
 
 # QC: Filter out poor pixels and genes
-counts <- cleanCounts(cd, min.lib.size = 100, min.reads = 1, verbose = TRUE)
+counts <- cleanCounts(cd, min.lib.size = 1, min.reads = 1, verbose = TRUE)
 spe.clean <- spe[rownames(counts),colnames(counts)]
-dim(spe.clean)
+dim(spe)
 # compute colsums to check lib size
 spe.clean$lib.size <- colSums(counts(spe.clean))
 

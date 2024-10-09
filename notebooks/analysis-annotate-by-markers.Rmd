@@ -77,10 +77,10 @@ threshold <- 5
 # Endothelial Cells
 target.cell <- "Endothelial Cells"
 
-marker.sel <- "PECAM1"
-threshold <- 1
 marker.sel <- "VWF"
-threshold <- 1
+threshold <- 2
+marker.sel <- "PECAM1"
+threshold <- 2
 ```
 
 ```{r}

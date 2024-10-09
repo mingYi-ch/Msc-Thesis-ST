@@ -158,7 +158,7 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id, assay = "l
 # Plot all curves
 
 ```{r}
-rerun.boot <- F
+rerun.boot <- T
 nei.spots <- T
 assay <- "log"
 
@@ -216,7 +216,7 @@ y_max <- max(comparison_data)
 # y_max <- 5
 y_expansion <- 0.6
 # degree of freedom of natural cubic spline 
-df <- 3
+df <- 2
 
 expr_comparison_pl <- tibble(expr = comparison_data) %>%
   mutate(avg.dist = as.factor(avg.dists), gene = as.factor(gene_ids)) %>% 
@@ -237,14 +237,16 @@ expr_comparison_pl <- tibble(expr = comparison_data) %>%
     #guides(color = guide_legend(override.aes = list(linetype = 1, size = 2)))  # Set legend as lines
 
 # TODO: Save the plot with rectangular dimensions
-# expr_comparison_pl
+expr_comparison_pl
 ```
 
 ```{r}
 # # hover up to hightlight line and gene name
-expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
-expr_comparison_pl_interactive
+# expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
+# expr_comparison_pl_interactive
 ```
+
+## Slop histgram
 
 ```{r}
 # extract median
@@ -276,14 +278,14 @@ plot(hist_result)
 ```
 
 ```{r}
-slopes_plot <- tibble(slopes = slopes) %>% 
-  ggplot(aes(x = slopes)) + 
-    geom_histogram(bins = 20, fill = "grey", color = "black") +
-    labs(title = "Histogram of slopes", x = "Value", y = "Frequency")
-
-slopes_plot
+# slopes_plot <- tibble(slopes = slopes) %>% 
+#   ggplot(aes(x = slopes)) + 
+#     geom_histogram(bins = 20, fill = "grey", color = "black") +
+#     labs(title = "Histogram of slopes", x = "Value", y = "Frequency")
+# 
+# slopes_plot
 # hist_result$breaks
-slope_upper <- 1
+slope_upper <- 0.2
 slope_lower <- -slope_upper
 ```
 
@@ -360,7 +362,7 @@ expr_comparison_pl <- tibble(expr = comparison_data) %>%
   # filter(gene %in% genes_plot) %>% 
   ggplot(aes(x = avg.dist, y = expr, text = hover_text)) +
     # geom_point(aes(color = gene), size = 1, alpha = 0) +
-    # geom_boxplot(aes(color = gene), width = 0.3, outlier.shape = NA) +  # Add boxplot
+    # geom_boxplot(aes(color <- = gene), width = 0.3, outlier.shape = NA) +  # Add boxplot
     geom_smooth(aes(color = pattern, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.13) +
     # geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8, alpha = 0.5) +
     scale_color_manual(values = pattern_color, labels = pattern_name) +
@@ -444,7 +446,6 @@ centroids.subset <- centroids %>%
   filter(pattern %in% target.pattern) %>% 
   mutate(hover_text = rownames(.))
 
-    centroids.subset
 umap_all <- as_tibble(umap) %>%
   ggplot(aes(x = umap[,1], y = umap[,2])) + 
   geom_point(size = 0.7, stroke = 0, color = "lightgrey") +  # all spots umap
@@ -473,14 +474,14 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_all, device
 
 umap_all
 # hover up to hightlight line and gene name
-umap_all_interactive <- ggplotly(umap_all, tooltip = "text")
-umap_all_interactive
+# umap_all_interactive <- ggplotly(umap_all, tooltip = "text")
+# umap_all_interactive
 ```
 
 ```{r}
-filename <- paste0("interactive_centroid",  ".html")
-filename <- file.path(res.dir, "plots", filename)
-saveWidget(umap_all_interactive, filename)
+# filename <- paste0("interactive_centroid",  ".html")
+# filename <- file.path(res.dir, "plots", filename)
+# saveWidget(umap_all_interactive, filename)
 
 ```
 
@@ -634,6 +635,35 @@ genes.syn <- rownames(centroids.subset)
 # Gene LogFC for each cluster
 
 ```{r}
+rerun.boot <- F
+nei.spots <- F
+assay <- "raw"
+
+# bootstrap for all selected genes and all spots
+if (rerun.boot) {
+  expression_data <- list()
+  boot.res <- list()
+  for(id in genes_of_interest){
+    # perform bootstrapping for both "inside" of genes
+    res_inside <- perform_bootstrapping("inside", genes_of_interest, id, assay)
+    res_outside <- perform_bootstrapping("outside", genes_of_interest, id, assay)
+    
+    if (nei.spots) {
+      expression_data[[id]] <- res_inside$expr
+      boot.res[[id]] <- res_inside
+    }else{
+      expression_data[[id]] <- c(res_inside$expr, res_outside$expr)
+      boot.res[[id]] <- rbind(res_inside, res_outside)
+    }
+  }
+      
+  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+}
+```
+
+```{r}
+nei.spots <- F
 assay <- "raw"
 boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 
@@ -699,31 +729,31 @@ logFC_quantile %>% filter(symbol == "IGFBP5")
 ```
 
 ```{r}
-# plot markers
-for (k in seq(K)) {
-  filename <-  glue("cluster_{k}_plots.pdf")
-  filepath <- file.path(res.dir, "plots", filename)
-  
-  # Open a PDF device to save the plots
-  pdf(filepath, width = 10, height = 8)
-  genes <- genes.syn[which(clusters == as.character(k))]
-  
-  if (k == "2") {
-    genes <- sample(genes, 30)
-  }
-  
-  for (gene in genes) {
-    correl_plots <- lemur_curve_plot(nei, fit_all,  gene, spe, stat_func_mean)
-    plots_ECs_nei <- lemur_nei_plot(spe, nei, fit_all, gene)
-    
-    # print to pdf device
-    print(correl_plots)
-    print(plots_ECs_nei)
-  }
-  
-  # Close the PDF device
-  dev.off()
-}
+# # plot markers
+# for (k in seq(K)) {
+#   filename <-  glue("cluster_{k}_plots.pdf")
+#   filepath <- file.path(res.dir, "plots", filename)
+#   
+#   # Open a PDF device to save the plots
+#   pdf(filepath, width = 10, height = 8)
+#   genes <- genes.syn[which(clusters == as.character(k))]
+#   
+#   if (k == "2") {
+#     genes <- sample(genes, 30)
+#   }
+#   
+#   for (gene in genes) {
+#     correl_plots <- lemur_curve_plot(nei, fit_all,  gene, spe, stat_func_mean)
+#     plots_ECs_nei <- lemur_nei_plot(spe, nei, fit_all, gene)
+#     
+#     # print to pdf device
+#     print(correl_plots)
+#     print(plots_ECs_nei)
+#   }
+#   
+#   # Close the PDF device
+#   dev.off()
+# }
 
 ```
 

@@ -38,6 +38,7 @@ library(magick)
 ```{r}
 source("../src/util.R")
 source("../config/config.R")
+source("../src/annotate_by_markers.R")
 ```
 
 # Load data
@@ -375,7 +376,7 @@ qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
 set.seed(5)
 nei <- lemur::find_de_neighborhoods(fit, 
                                     group_by = vars(dist.cluster), 
-                                    min_neighborhood_size = 10,
+                                    min_neighborhood_size = 20,
                                     selection_procedure = "zscore",
                                     directions  = "contrast",
                                     make_neighborhoods_consistent = F,
