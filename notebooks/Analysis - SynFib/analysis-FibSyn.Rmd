@@ -91,9 +91,9 @@ gene_of_interest <- markers.SynFib %>% sample(1)
 gene_of_interest <- markers.SynFib[1]
 gene_of_interest <- "COL3A1" #X
 gene_of_interest <- "BGN"
-gene_of_interest <- "THY1"
 gene_of_interest <- "PRG4"
 gene_of_interest <- "HTRA1"
+gene_of_interest <- "THY1"
 
 P.Val <- NA
 if (gene_of_interest %in% names(pvals) ) {

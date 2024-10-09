@@ -372,7 +372,7 @@ qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
 ```
 
 ```{r}
-set.seed(1)
+set.seed(5)
 nei <- lemur::find_de_neighborhoods(fit, 
                                     group_by = vars(dist.cluster), 
                                     min_neighborhood_size = 10,
