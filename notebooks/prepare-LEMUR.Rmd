@@ -96,7 +96,6 @@ if (use.model) {
   pos.target <-  pos[bc.target,]
   weights <- rep(1, length(bc.target))
 }
-
 ```
 
 ```{r}

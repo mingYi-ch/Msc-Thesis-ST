@@ -143,8 +143,8 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = 
 size_title <- 16
 size_axis_title <- 15
 size_axis_text <- 30
-size_legend_title <- 18
-size_legend_text <- 13
+size_legend_title <- 15
+size_legend_text <- 10
 size_subtitle <- 14
 ```
 
@@ -159,25 +159,34 @@ n <- 50
 # Generate two clusters
 # Cluster 1: centered at (2, 2)
 cluster1_x <- rnorm(n, mean = 2, sd = 0.5)
-cluster1_y <- rnorm(n, mean = 2, sd = 1)
-cluster1_values <- rnorm(n, mean = 0, sd = 3)  # Values associated with Cluster 1
+cluster1_y <- rnorm(n, mean = 2, sd = 0.5)
+cluster1_values <- rnorm(n, mean = 0, sd = 2)  # Values associated with Cluster 1
 
 # Cluster 2: centered at (7, 7)
 cluster2_x <- rnorm(n, mean = 7, sd = 0.5)
 cluster2_y <- rnorm(n, mean = 2, sd = 0.5)
-cluster2_values <- rnorm(n, mean = 20, sd = 2)  # Values associated with Cluster 2
+cluster2_values <- rnorm(n, mean = 0, sd = 2)  # Values associated with Cluster 2
+
+cluster11_x <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster11_y <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster11_values <- rnorm(n/2, mean = 20, sd = 2)  # Values associated with Cluster 1
+
+# Cluster 2: centered at (7, 7)
+cluster22_x <- rnorm(n/2, mean = 7, sd = 0.1)
+cluster22_y <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster22_values <- rnorm(n/2, mean = 20, sd = 2)  # Values associated with Cluster 2
 
 # Combine clusters into a data frame without cluster labels
 df <- data.frame(
-  x = c(cluster1_x, cluster2_x),
-  y = c(cluster1_y, cluster2_y),
-  value = c(cluster1_values, cluster2_values)  # Associate values
+  x = c(cluster1_x, cluster2_x, cluster11_x, cluster22_x),
+  y = c(cluster1_y, cluster2_y, cluster11_y, cluster22_y),
+  value = c(cluster1_values, cluster2_values, cluster11_values, cluster22_values)  # Associate values
 )
 
 # Add some random noise points
-noise_x <- rnorm(20, mean = 4.5, sd = 2)
-noise_y <- rnorm(20, mean = 4.5, sd = 2)
-noise_values <- rnorm(20, mean = 0, sd = 5)  # Noise values
+# noise_x <- rnorm(20, mean = 4.5, sd = 2)
+# noise_y <- rnorm(20, mean = 4.5, sd = 2)
+# noise_values <- rnorm(20, mean = 0, sd = 5)  # Noise values
 
 # # Add noise points to the data frame
 # df_noise <- data.frame(
@@ -200,8 +209,8 @@ plots <- as_tibble(df) %>%
     scale_color_gradient(low = "lightblue", high = "blue") +
     theme_minimal() +
     labs(subtitle = NULL,
-         x = "PC1",
-         y = "PC2",
+         x = "PCi",
+         y = "PCj",
          color = "DE") +
     theme(
       plot.title = element_text(size = size_title),
@@ -223,16 +232,16 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = 
 ```{r}
 # Create a violin plot combined with a boxplot, using variables for text sizes
 plots <- as_tibble(df) %>% 
-  ggplot(aes(x = x, y = 0, color = value)) +
+  ggplot(aes(x = 0, y = y, color = value)) +
     geom_point(stroke = 0.1, size = 1.8, alpha = 1) +
     # scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
     # scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
     scale_color_gradient(low = "lightblue", high = "blue") +
-    ylim(c(0, 0.0001)) +
+    xlim(c(0, 0.0001)) +
     theme_minimal() +
     labs(subtitle = NULL,
-         x = "selected projection direction",
-         y = NULL,
+         y = "selected projection direction",
+         x = NULL,
          color = "DE") +
     theme(
       # legend.position = "none",

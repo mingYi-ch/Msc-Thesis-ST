@@ -2,7 +2,7 @@ library(SpatialExperiment)
 library(igraph)
 library(ggplot2)
 library(jsonlite)
-
+library(scales)
 # Function to calculate the average distance for each cluster
 calculate.avg.dist <- function(x) {
   # Remove square brackets and parentheses
@@ -161,9 +161,11 @@ lemur_nei_plot <- function(spe, nei, fit, gene_of_interest) {
     geom_point(aes(stroke = strokes, shape = groups, fill = inside.col), size = 2, alpha = 0.5, color = "black") + # here is the border color
     scale_shape_manual(values = c(24, 21)) +
     scale_fill_manual(values = specified_colors) +
-    labs(subtitle = glue("LEMUR neighborhood clusterfor gene: {gene_of_interest}"),
-         x = "row pixel in full resolution",
-         y = "column pixel in full resolution",
+    scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    labs(subtitle = glue("{gene_of_interest} neighborhood cluster"),
+         x = "row pixel",
+         y = "col pixel",
          fill = "spots category by color: ",
          shape = "cell type group by shape:") + 
     

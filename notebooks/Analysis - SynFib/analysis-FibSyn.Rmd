@@ -85,16 +85,21 @@ markers.SynFib <- marker.genes %>%
 ```{r}
 nei <- nei_all %>% filter(name %in% markers.SynFib)
 idx <- nei$sel_statistic %>% which.min()
-nei$name[idx]
 
 gene_of_interest <- markers.SynFib %>% sample(1)
 gene_of_interest <- markers.SynFib[1]
 gene_of_interest <- "COL3A1" #X
 gene_of_interest <- "BGN"
-gene_of_interest <- "THY1"
 gene_of_interest <- "HTRA1"
-gene_of_interest <- "PRG4"
+gene_of_interest <- "CRTAC1"
 
+gene_of_interest <- "PRG4"
+gene_of_interest <- "THY1"
+
+gene_of_interest <- "EFEMP1"
+gene_of_interest <- "HTRA1"
+gene_of_interest <- "SSPN"
+gene_of_interest <- "S100A13"
 P.Val <- NA
 if (gene_of_interest %in% names(pvals) ) {
   P.Val <- pvals[[gene_of_interest]]

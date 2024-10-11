@@ -158,7 +158,7 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id, assay = "l
 # Plot all curves
 
 ```{r}
-rerun.boot <- T
+rerun.boot <- F
 nei.spots <- T
 assay <- "log"
 
@@ -217,6 +217,7 @@ y_max <- max(comparison_data)
 y_expansion <- 0.6
 # degree of freedom of natural cubic spline 
 df <- 2
+set.seed(1)
 
 expr_comparison_pl <- tibble(expr = comparison_data) %>%
   mutate(avg.dist = as.factor(avg.dists), gene = as.factor(gene_ids)) %>% 
@@ -342,12 +343,15 @@ assign_pattern <- function(gene) {
     return("flat")
   }
 }
-pattern_color <- c("decr" = "blue", "incr" = "lightblue", "flat" = "grey")
+pattern_color <- c("decr" = "blue", "incr" = "red", "flat" = "lightgreen")
 pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
+pattern_name <- c("decr" = "decr", "incr" = "incr", "flat" = "flat")
 ```
 
+## curves plot
+
 ```{r}
-size.axis.text <- 7.5 * 2
+size.axis.text <- 7.5 * 1.5
 size.axis.title <- 8 * 2
 size.axis <- 7 * 2
 
@@ -373,34 +377,34 @@ expr_comparison_pl <- tibble(expr = comparison_data) %>%
     labs(
         x = "avg.dist / spots",
         y = "Log Expr.",
-        subtitle = paste0("All gene vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped "),
+        # subtitle = paste0("All gene vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped "),
         color = NULL
         #color = glue("pattern (absolute slope threshold{slope_upper})")
           ) +
     
     theme(
         plot.subtitle = element_text(size = size.axis.title),
-        legend.text = element_text(size = size.axis.text),
-        axis.title.x = element_text(size = size.axis.text),
-        axis.title.y = element_text(size = size.axis.text),
-        axis.text.x = element_text(size = size.axis),  
-        axis.text.y = element_text(size = size.axis),
+        legend.text = element_text(size = size.axis.title),
+        axis.title.x = element_text(size = size.axis.title),
+        axis.title.y = element_text(size = size.axis.title),
+        axis.text.x = element_text(size = size.axis.text),  
+        axis.text.y = element_text(size = size.axis.text),
         legend.position = "bottom") +
   
     guides(
         x = guide_axis(angle = 45),
-        color = guide_legend(override.aes = list(linetype = 1, size = size.axis.text / 2)))  # Set legend as lines
+        color = guide_legend(override.aes = list(linetype = 1, linewidth = 2, size = size.axis.text / 2)))  # Set legend as lines
 
 expr_comparison_pl
-# hover up to hightlight line and gene name
-expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
-expr_comparison_pl_interactive
+# # hover up to hightlight line and gene name
+# expr_comparison_pl_interactive <- ggplotly(expr_comparison_pl, tooltip = "text")
+# expr_comparison_pl_interactive
 ```
 
 ```{r}
-filename <- paste0("interactive_plot_curves",  ".html")
-filename <- file.path(res.dir, "plots", filename)
-saveWidget(expr_comparison_pl_interactive, filename)
+# filename <- paste0("interactive_plot_curves",  ".html")
+# filename <- file.path(res.dir, "plots", filename)
+# saveWidget(expr_comparison_pl_interactive, filename)
 
 filename <- paste0("plot_all_curves",  ".svg")
 ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_pl, device = "svg", width = 10, height = 8, dpi = 700)
@@ -437,7 +441,6 @@ size.axis <- 7 * 2
 
 ```{r}
 # filter
-pattern_name <- c("decr" = "decreasing", "incr" = "increasing", "flat" = "flat")
 pattern_color <- c("decr" = "blue", "incr" = "red", "flat" = "lightgreen")
 
 patterns <- c("decr", "incr","flat")
@@ -454,16 +457,17 @@ umap_all <- as_tibble(umap) %>%
   
   theme(
         plot.subtitle = element_text(size = size.axis.title),
-        legend.text = element_text(size = size.axis.text),
-        legend.title = element_text(size = size.axis.text),
-        axis.title.x = element_text(size = size.axis.text),
-        axis.title.y = element_text(size = size.axis.text),
-        axis.text.x = element_text(size = size.axis),  
-        axis.text.y = element_text(size = size.axis),
+        legend.text = element_text(size = size.axis.title),
+        legend.title = element_text(size = size.axis.title),
+        axis.title.x = element_text(size = size.axis.title),
+        axis.title.y = element_text(size = size.axis.title),
+        axis.text.x = element_text(size = size.axis.text),  
+        axis.text.y = element_text(size = size.axis.text),
         legend.position = "bottom") +
   
-  guides(color = guide_legend(override.aes = list(size = 1.5))) +
-  labs(subtitle = glue("centroids - {target.pattern} - in UMAP"),
+  guides(color = guide_legend(override.aes = list(size = 2.5))) +
+  labs(
+      # subtitle = glue("centroids - {target.pattern} - in UMAP"),
        x = "UMAP 1",
        y = "UMAP 2")
 
@@ -474,8 +478,8 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = umap_all, device
 
 umap_all
 # hover up to hightlight line and gene name
-# umap_all_interactive <- ggplotly(umap_all, tooltip = "text")
-# umap_all_interactive
+umap_all_interactive <- ggplotly(umap_all, tooltip = "text")
+umap_all_interactive
 ```
 
 ```{r}
@@ -599,24 +603,26 @@ kmeans_result <- kmeans(centroids.subset[, 1:2], centers = K, nstart = 20)
 centroids.subset$cluster <- kmeans_result$cluster %>% as.character()
 
 # plot
+pattern_color <- c("2" = "blue", "1" = "skyblue4", "3" = "red", "4" = "lightgreen")
 umap_decr <- as_tibble(umap) %>%
   ggplot(aes(x = umap[,1], y = umap[,2])) + 
   geom_point(size = 0.7, stroke = 0, color = "lightgrey") +  # all spots umap
   geom_point(data = centroids.subset, aes(x = x, y = y, color = cluster), size = 1, stroke = 0) +  # centroid of genes_of_interest highlight
-  # scale_color_manual(values = pattern_color_subset , labels = pattern_name ) +
+  scale_color_manual(values = pattern_color) +
   
   theme(
         plot.subtitle = element_text(size = size.axis.title),
-        legend.text = element_text(size = size.axis.text),
-        legend.title = element_text(size = size.axis.text),
-        axis.title.x = element_text(size = size.axis.text),
-        axis.title.y = element_text(size = size.axis.text),
-        axis.text.x = element_text(size = size.axis),  
-        axis.text.y = element_text(size = size.axis),
+        legend.text = element_text(size = size.axis.title),
+        legend.title = element_text(size = size.axis.title),
+        axis.title.x = element_text(size = size.axis.title),
+        axis.title.y = element_text(size = size.axis.title),
+        axis.text.x = element_text(size = size.axis.text),  
+        axis.text.y = element_text(size = size.axis.text),
         legend.position = "bottom") +
   
   guides(color = guide_legend(override.aes = list(size = 2))) +
-  labs(subtitle = glue("Cluster of centroids - ALL - in UMAP"),
+  labs(
+    # subtitle = glue("Cluster of centroids - ALL - in UMAP"),
        x = "UMAP 1",
        y = "UMAP 2")
 
@@ -706,10 +712,10 @@ logFC <- cal.logFC(gene_medians_both)
 # logFC
 
 # compute third/max quantile of the logFC for each gene
-quantile <- 0.75
+quantile <- 1.0
 logFC_quantile <- as_tibble(logFC) %>% 
   group_by(symbol) %>% 
-  summarize(logFC = quantile(logFC, probs = quantile, na.rm = T), .groups = "drop") 
+  summarize(logFC = quantile(logFC, probs = quantile, na.rm = T) %>% round(2), .groups = "drop") 
 
 cluster.order <- clusters[logFC_quantile$symbol]
 logFC_quantile$cluster <- cluster.order
@@ -719,9 +725,14 @@ markers_cluster <- as_tibble(logFC_quantile) %>%
   top_n(., 10, wt = logFC) 
 
 for (c in seq(4)) {
-  print(markers_cluster %>% filter(cluster == as.character(c)))
+  your_data <- markers_cluster %>% filter(cluster == as.character(c))
+  your_data_clean <- your_data %>%
+  mutate(logFC = ifelse(is.infinite(logFC), "Inf", logFC))
+    # print(markers_cluster %>% filter(cluster == as.character(c)))
+  datatable(your_data, options = list(pageLength = 10, autoWidth = TRUE),  escape = FALSE) %>% print()
 }
 
+library(DT)
 ```
 
 ```{r}
