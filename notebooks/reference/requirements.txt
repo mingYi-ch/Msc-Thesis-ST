@@ -1,8 +1,0 @@
-scanpy
-anndata
-pandas
-numpy
-matplotlib
-scvi-tools
-seaborn
-pyreadr

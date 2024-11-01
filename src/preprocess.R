@@ -3,6 +3,7 @@ library(qs)
 library(STdeconvolve)
 library(scuttle)
 library(dplyr)
+library(patchwork)
 library(Matrix)
 
 source("./src/util.R")
@@ -39,30 +40,16 @@ seurat_obj <- CreateSeuratObject(counts = counts) %>%
   RunPCA(features = VariableFeatures(.), npcs = 50, verbose = FALSE) %>%
   RunUMAP(dims = 1:10)
 
-
-## scree plot seurat
+## scree plot Seurat
 data.pca <- GetAssayData(seurat_obj[VariableFeatures(seurat_obj),], slot = "data")
-dim(data.pca)
+
 #perform PCA
 results <- prcomp(data.pca, scale = T, center = T)
-# screeplot(results, type = "lines", main = "Scree Plot")
+
 #calculate total variance explained by each principal component
-var_explained <-  results$sdev^2 / sum(results$sdev^2)
-
-#create scree plot
-n_pc <- 50
-df <- data.frame(
-  PC = 1:n_pc,               
-  var_prop = var_explained[1:n_pc]
-)
-
-# Plot using ggplot
-ggplot(df, aes(x = PC, y = var_prop)) + 
-  geom_line() + 
-  xlab("Principal Component") + 
-  ylab("Variance Explained") +
-  ggtitle("Scree Plot") +
-  ylim(0, 1)  # Set y-axis limits between 0 and 1
+var.explained.seurat <-  results$sdev^2 / sum(results$sdev^2)
+scree.plot.seurat <- scree.plot(var.explained.seurat, 50)
+scree.plot.seurat
 
 
 umap_seurat <- Embeddings(seurat_obj, reduction = "umap")
@@ -71,28 +58,21 @@ pca_seurat <- Embeddings(seurat_obj, reduction = "pca")
 reducedDim(spe.clean, "umap_seurat") <- umap_seurat
 reducedDim(spe.clean, "pca_seurat") <- pca_seurat
 
-## Huber paper method
+## Huber paper method 
 logcounts(spe.clean) <- transformGamPoi::shifted_log_transform(spe.clean)
 data.pca <- logcounts(spe.clean)
+
 #perform PCA
 results <- prcomp(data.pca, scale = T, center = T)
+
 #calculate total variance explained by each principal component
-var_explained <-  results$sdev^2 / sum(results$sdev^2)
+var.explained.spe <-  results$sdev^2 / sum(results$sdev^2)
+scree.plot.spe <- scree.plot(var.explained.spe, 50, 28, 28)
+scree.plot.spe
 
-#create scree plot
-n_pc <- 500
-df <- data.frame(
-  PC = 1:n_pc,               
-  var_prop = var_explained[1:n_pc]
-)
-
-# Plot using ggplot
-ggplot(df, aes(x = PC, y = var_prop)) + 
-  geom_line() + 
-  xlab("Principal Component") + 
-  ylab("Variance Explained") +
-  ggtitle("Scree Plot") +
-  ylim(0, 1)  # Set y-axis limits between 0 and 1
+fn <- glue("spe-pca.pdf")
+res.dir <- get.res.dir()
+ggsave(filename = file.path(res.dir, "plots", fn), device = "pdf", plot = scree.plot.spe, width = 9, height = 8)
 
 umap_huber <- scater::calculateUMAP(spe.clean, pca = 10)
 
@@ -109,8 +89,7 @@ metadata(spe.clean)$var.genes <- variable_genes
 # non var.genes for testing
 nonzero.gene <- rownames(spe.clean)[rowSums(counts(spe.clean)) > 0]
 gene.var <- apply(counts(spe.clean)[nonzero.gene,], 1, var) %>% sort()
-# gene.var[1]
-# sum(counts(spe.clean)["LDLRAD2",])
+
 metadata(spe.clean)$nonvar.genes <- names(gene.var)[1:3] 
 
 # select spatial features STdeconvolve
@@ -134,14 +113,13 @@ dim(corpus)
 # load reference data set
 dir.data <- get.data.dir()
 sce.path <- file.path(dir.data, "scRNA-seq", "sce.qs")
-# qsave(sce, sce.path)
 sce <- qread(sce.path)
 
 shared.genes <- intersect(rownames(sce), rownames(spe))
 length(shared.genes)
 sce.subset <- sce[shared.genes,]
 
-# QC
+# QC:scRNA-seq
 seurat_obj <- as.Seurat(sce.subset, 
                         counts = "counts", data = "logcounts", 
                         min.cells = 3, min.features = 200)
@@ -161,11 +139,6 @@ if (file.exists(marker.path)) {
   qsave(markers, marker.path)
 }
 
-# dim(markers)
-# head(markers)
-# markers <- unique(markers$gene)
-# length(markers)
-
 # select top marker genes for each cell type
 top.markers <- markers %>%
   group_by(cluster) %>%
@@ -174,15 +147,6 @@ top.markers <- markers %>%
   ungroup() %>% 
   select(gene) 
 
-# top.markers <- markers %>% 
-#   group_by(cluster) %>%
-#   top_n(n = 50, wt = avg_log2FC) %>% 
-#   filter(cluster == "Endothelial Cells" & pct.1 > 0.25 & pct.2 >= 0)
-
-# top.markers
-# head(top.markers)
-# "VWF" %in%  top.markers$gene
-# union of spatial and the single cell features
 
 genes.sel <- union(rownames(corpus), intersect(rownames(counts), top.markers$gene))
 
@@ -199,6 +163,10 @@ sp_data_qc_berglund <- file.path(dir.data, "SHK166_RA_Knee","sp_counts_SHK166_RA
 bc_qc <- file.path(dir.data, "SHK166_RA_Knee","bc_qc.tsv")
 
 dir.data.processed <- file.path(dir.data, "processed")
+if (!dir.exists(dir.data.processed)) {
+  dir.create(dir.data.processed, recursive = TRUE)  # 'recursive = TRUE' creates any necessary parent directories
+  message("Directory created at: ", dir.data.processed)
+}
 
 cellcount <- file.path(dir.data.processed, "sc_counts_SHK166_RA_Knee.mtx")
 sp_data <- file.path(dir.data.processed, "sp_counts_SHK166_RA_Knee.mtx")

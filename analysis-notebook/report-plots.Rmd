@@ -1,0 +1,403 @@
+---
+title: "QC"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+library(dplyr)
+library(Seurat)
+library(png)
+library(glue)
+library(grid)
+library(EBImage)
+library(jsonlite)
+library(magick)
+library(scales)
+
+
+```
+
+```{r}
+source("../src/util.R")
+source("../config/config.R")
+```
+
+# Data
+
+```{r}
+dir <- get.data.dir()
+res.dir <- get.res.dir()
+
+# load raw data
+spe.path <- get.std.path()
+spe.raw <- load.data(spe.path)
+
+# cleaned
+dir.data.processed <- file.path(dir, "processed")
+spe.clean <- qread(file.path(dir.data.processed, "spe_clean.qs"))
+
+# load reference data set
+ref <- qread(file.path(res.dir, "SCE/sce.qs"))
+
+```
+
+# QC-Violin
+
+```{r}
+col_sums_spatial <- tibble(type = "spatial data", bc = colnames(spe.clean), colSum = colSums(counts(spe.clean)))
+
+# subset genes
+ref.subset <- ref[rownames(spe.clean),]
+col_sums_sce <- tibble(type = "scRNA-seq reference", bc = colnames(ref.subset), colSum = colSums(counts(ref.subset)))
+hist(col_sums_sce$colSum)
+col_sums <- rbind(col_sums_spatial, col_sums_sce)
+
+# Set text size variables
+size_title <- 16
+size_axis_title <- 15
+size_axis_text <- 15
+size_legend_title <- 13
+size_legend_text <- 11
+size_subtitle <- 14
+
+# Create a violin plot combined with a boxplot, using variables for text sizes
+plots <- ggplot(col_sums, aes(x = type, y = colSum)) +
+  geom_violin(trim = FALSE, fill = "lightblue", alpha = 0.5) +
+  geom_boxplot(width = 0.1, fill = "grey80", color = "grey30", outlier.shape = NA, alpha = 0.5) +
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+  theme_minimal() +
+  labs(subtitle = NULL,
+       x = NULL, 
+       y = "Library size") +
+  theme(
+    plot.title = element_text(size = size_title),
+    plot.subtitle = element_text(size = size_subtitle),
+    axis.title.x = element_text(size = size_axis_title),
+    axis.title.y = element_text(size = size_axis_title),
+    axis.text.x = element_text(size = size_axis_text),
+    axis.text.y = element_text(size = size_axis_text),
+    legend.title = element_text(size = size_legend_title),
+    legend.text = element_text(size = size_legend_text)
+  )
+
+plots
+```
+
+```{r}
+filename <- "QC-violin.pdf"
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "pdf", width = 10, height = 8)
+```
+
+# Arrays
+
+```{r}
+filename <- "arrays-clean.pdf"
+spe <- spe.clean
+
+filename <- "arrays-raw.pdf"
+spe <- spe.raw
+
+# Set text size variables
+size_title <- 16
+size_axis_title <- 28
+size_axis_text <- 26
+
+size_legend_title <- 13
+size_legend_text <- 11
+size_subtitle <- 14
+
+# Create a violin plot combined with a boxplot, using variables for text sizes
+plots <- spatialCoords(spe) %>% 
+  ggplot(aes(x = x, y = y)) +
+    geom_point(stroke = 0.1, size = 1.8, alpha = 0.5) +
+    scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+
+    theme_minimal() +
+    labs(subtitle = NULL,
+         x = "row pixel", 
+         y = "col pixel") +
+    theme(
+      plot.title = element_text(size = size_title),
+      plot.subtitle = element_text(size = size_subtitle),
+      axis.title.x = element_text(size = size_axis_title),
+      axis.title.y = element_text(size = size_axis_title),
+      axis.text.x = element_text(size = size_axis_text),
+      axis.text.y = element_text(size = size_axis_text),
+      legend.title = element_text(size = size_legend_title),
+      legend.text = element_text(size = size_legend_text)
+    )
+plots
+
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "pdf", width = 10, height = 8)
+
+```
+
+# Neighborhood Example in latent
+
+```{r}
+# Set text size variables
+size_title <- 16
+size_axis_title <- 15
+size_axis_text <- 30
+size_legend_title <- 15
+size_legend_text <- 10
+size_subtitle <- 14
+```
+
+```{r}
+# adapted code from CHATGPT
+# Set seed for reproducibility
+set.seed(123)
+
+# Number of points per cluster
+n <- 50
+
+# Generate two clusters
+# Cluster 1: centered at (2, 2)
+cluster1_x <- rnorm(n, mean = 2, sd = 0.5)
+cluster1_y <- rnorm(n, mean = 2, sd = 0.5)
+cluster1_values <- rnorm(n, mean = 0, sd = 2)  # Values associated with Cluster 1
+
+# Cluster 2: centered at (7, 7)
+cluster2_x <- rnorm(n, mean = 7, sd = 0.5)
+cluster2_y <- rnorm(n, mean = 2, sd = 0.5)
+cluster2_values <- rnorm(n, mean = 0, sd = 2)  # Values associated with Cluster 2
+
+cluster11_x <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster11_y <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster11_values <- rnorm(n/2, mean = 20, sd = 2)  # Values associated with Cluster 1
+
+# Cluster 2: centered at (7, 7)
+cluster22_x <- rnorm(n/2, mean = 7, sd = 0.1)
+cluster22_y <- rnorm(n/2, mean = 2, sd = 0.1)
+cluster22_values <- rnorm(n/2, mean = 20, sd = 2)  # Values associated with Cluster 2
+
+# Combine clusters into a data frame without cluster labels
+df <- data.frame(
+  x = c(cluster1_x, cluster2_x, cluster11_x, cluster22_x),
+  y = c(cluster1_y, cluster2_y, cluster11_y, cluster22_y),
+  value = c(cluster1_values, cluster2_values, cluster11_values, cluster22_values)  # Associate values
+)
+
+# Add some random noise points
+# noise_x <- rnorm(20, mean = 4.5, sd = 2)
+# noise_y <- rnorm(20, mean = 4.5, sd = 2)
+# noise_values <- rnorm(20, mean = 0, sd = 5)  # Noise values
+
+# # Add noise points to the data frame
+# df_noise <- data.frame(
+#   x = noise_x,
+#   y = noise_y,
+#   value = noise_values  # Values associated with noise
+# )
+
+# Combine clusters and noise
+# df_final <- rbind(df, df_noise)
+
+# Plot the data points
+
+# Create a violin plot combined with a boxplot, using variables for text sizes
+plots <- as_tibble(df) %>% 
+  ggplot(aes(x = x, y = y, color = value)) +
+    geom_point(stroke = 0.1, size = 1.8, alpha = 1) +
+    # scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    # scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    scale_color_gradient(low = "lightblue", high = "blue") +
+    theme_minimal() +
+    labs(subtitle = NULL,
+         x = "PCi",
+         y = "PCj",
+         color = "DE") +
+    theme(
+      plot.title = element_text(size = size_title),
+      plot.subtitle = element_text(size = size_subtitle),
+      axis.title.x = element_text(size = size_axis_title),
+      axis.title.y = element_text(size = size_axis_title),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      legend.title = element_text(size = size_legend_title),
+      legend.text = element_text(size = size_legend_text)
+    )
+plots
+
+filename <- "latent_space.pdf"
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "pdf", width = 10, height = 8)
+
+```
+
+```{r}
+# Create a violin plot combined with a boxplot, using variables for text sizes
+plots <- as_tibble(df) %>% 
+  ggplot(aes(x = 0, y = y, color = value)) +
+    geom_point(stroke = 0.1, size = 1.8, alpha = 1) +
+    # scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    # scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+    scale_color_gradient(low = "lightblue", high = "blue") +
+    xlim(c(0, 0.0001)) +
+    theme_minimal() +
+    labs(subtitle = NULL,
+         y = "selected projection direction",
+         x = NULL,
+         color = "DE") +
+    theme(
+      # legend.position = "none",
+      plot.title = element_text(size = size_title),
+      plot.subtitle = element_text(size = size_subtitle),
+      axis.title.x = element_text(size = size_axis_title),
+      axis.title.y = element_text(size = size_axis_title),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      legend.title = element_text(size = size_legend_title),
+      legend.text = element_text(size = size_legend_text)
+    )
+plots
+
+filename <- "latent_space_projection.pdf"
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "pdf", width = 10, height = 8)
+```
+
+# Nei and ECs
+
+```{r}
+res.dir.LEMUR <- file.path(get.res.dir(), "LEMUR")
+
+fit <- qs::qread(file.path(res.dir.LEMUR, "fit.qs"))
+
+nei_all <- qs::qread(file.path(res.dir.LEMUR, "nei.qs"))
+
+spe <- qs::qread(file.path(res.dir.LEMUR, "se_dist.qs"))
+
+# Set text size variables
+size_title <- 16
+size_axis_title <- 15
+size_axis_text <- 12
+size_legend_title <- 15
+size_legend_text <- 13
+size_subtitle <- 14
+```
+
+```{r}
+# maually by marker
+cluster <-  "ECs"
+marker.sel <- NA
+
+filename <- glue("ECs_manually_marker_final.qs")
+is.ec.spot <- qread(file.path(res.dir, "deconvolution", filename))
+
+method <- paste0("Manually by marker ", marker.sel)
+bc.target <- colnames(spe)[is.ec.spot]
+
+# set for ECs 
+groups <- rep("others", ncol(spe))
+names(groups) <- colnames(spe)
+groups[bc.target] <- cluster
+min.dists <- spe$min.dists
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# remove spots far away from ECs
+dist.cutoff <- 4.5
+spots.sel <- spe$min.dists <= dist.cutoff
+
+table(spots.sel)
+# Create ggplot object
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups, fill = spots.sel)) +
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+  scale_shape_manual(values = c(24, 21)) +
+  scale_fill_manual(values = c("TRUE" = "lightblue", "FALSE" = "grey"), labels = c("TRUE" ="included", "FALSE" ="excluded")) +
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+  scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+  scale_color_gradient(low = "lightblue", high = "blue") +
+  theme(
+      plot.title = element_text(size = size_title),
+      plot.subtitle = element_text(size = size_subtitle),
+      axis.title.x = element_text(size = size_axis_title),
+      axis.title.y = element_text(size = size_axis_title),
+      axis.text.x = element_text(size = size_axis_text),
+      axis.text.y = element_text(size = size_axis_text),
+      legend.title = element_text(size = size_legend_title),
+      legend.text = element_text(size = size_legend_text),
+      legend.position = "bottom") +
+  labs(
+       x = "row pixel",
+       y = "col pixel",
+       fill = "spots category by color: ",
+       shape = "cell type group by shape:") +
+  guides(fill = guide_legend(nrow = 2, override.aes = list(shape = 22, color = c("lightblue", "lightgrey"), size = 5)),
+           shape = guide_legend(nrow = 2, override.aes = list(size = 5)))  # Set legend as lines
+
+filename <- paste0("spots-to-evaluate.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, width = 7.5, height = 5)
+
+plots
+```
+
+```{r}
+# maually by marker
+cluster <-  "ECs"
+marker.sel <- NA
+
+method <- paste0("Manually by marker ", marker.sel)
+bc.target <- colnames(spe)[is.ec.spot]
+
+# set for ECs 
+groups <- rep("others", ncol(spe))
+names(groups) <- colnames(spe)
+groups[bc.target] <- cluster
+min.dists <- spe$min.dists
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# remove spots far away from ECs
+dist.cutoff <- 4.5
+spots.sel <- spe$min.dists <= dist.cutoff
+
+table(spots.sel)
+# Create ggplot object
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups)) +
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.5, color = "black", fill = 'grey') +
+  scale_shape_manual(values = c(24, 21)) +
+  scale_y_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+  scale_x_continuous(labels = label_number(scale = 1e-3, suffix = "k")) +  # Format y-axis labels
+  # scale_color_gradient(low = "lightblue", high = "blue") +
+  theme(
+      plot.title = element_text(size = size_title),
+      plot.subtitle = element_text(size = size_subtitle),
+      axis.title.x = element_text(size = size_axis_title),
+      axis.title.y = element_text(size = size_axis_title),
+      axis.text.x = element_text(size = size_axis_text),
+      axis.text.y = element_text(size = size_axis_text),
+      legend.title = element_text(size = size_legend_title),
+      legend.text = element_text(size = size_legend_text),
+      legend.position = "bottom") +
+  labs(
+       x = "row pixel",
+       y = "col pixel",
+       fill = NA,
+       shape = "spots category:") +
+  guides(
+           shape = guide_legend(nrow = 1, override.aes = list(size = 3)))
+
+filename <- paste0("ECs-loctaion.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, width = 6, height = 4)
+
+plots
+```

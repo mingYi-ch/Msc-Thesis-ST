@@ -1,4 +1,4 @@
-# check host
+# set project dir for local and S3IT
 host <- "local"
 if (dir.exists("/home/myi")) {
   host <- "cluster"
@@ -31,6 +31,13 @@ get.res.dir <- function() {
   path <- file.path(proj.dir.cluster, "results")
   if (host == "local") {
     path <- file.path(proj.dir.local, "results")
+  }
+  
+  # Check if the path exists, and if not, create it
+  path.plot <- file.path(path, "plots")
+  if (!dir.exists(path.plot)) {
+    dir.create(path.plot, recursive = TRUE)  # 'recursive = TRUE' creates any necessary parent directories
+    message("Directory created at: ", path.plot)
   }
   return(path)
 }

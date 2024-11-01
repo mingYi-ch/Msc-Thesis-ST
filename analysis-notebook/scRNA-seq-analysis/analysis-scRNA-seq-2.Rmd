@@ -1,0 +1,215 @@
+---
+title: "scRNA-seq"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(SingleCellExperiment)
+
+library(lemur)
+library(qs)
+
+library(purrr)
+
+library(stringr)
+library(Seurat)
+library(harmony)
+library(cowplot)
+library(irlba)
+
+library(glue)
+
+
+
+```
+
+```{r}
+source("../../src/util.R")
+source("../../config/config.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+res.dir <- get.res.dir()
+```
+
+```{r}
+# load reference scRNA-seq: the first one 10,000
+ref_path <- get.refd.path()
+ref_path
+ref <- readRDS(ref_path)
+counts.sc <- ref@counts
+ctypes <- ref@cell_types
+prefix.bcs <- colnames(counts.sc)
+
+sum(which(colnames(counts.sc) != names(ctypes)))
+```
+
+```{r}
+# locate prefix without digits
+prefixs <- lapply(prefix.bcs, function(i) {
+                      outs <- str_locate_all(i, "_")[[1]]
+                      last <- outs[nrow(outs), 1, drop = T]
+                      digit.idx <- str_locate(i, "\\d")
+                      if (!is.na(digit.idx[1,1])) {
+                        last <- digit.idx[1,1]
+                      }
+                      sub <- substring(i, 1, last - 1)
+                      return(sub)}
+)
+
+prefixs2 <- lapply(prefix.bcs, function(i) {
+                      outs <- str_locate_all(i, "_")[[1]]
+                      last <- outs[1, 1, drop = T]
+                      sub <- substring(i, 1, last - 1)
+                      return(sub)}
+)
+
+
+sce <- SingleCellExperiment(
+  assays = list(counts =counts.sc)
+)
+sce
+
+prefixs <- unlist(prefixs, recursive = T)
+sce$samples <- prefixs
+
+prefixs2 <- unlist(prefixs2, recursive = T)
+sce$cell.group.4 <- prefixs2
+
+sce$ctypes <- ctypes
+```
+
+# Variance plot
+
+```{r}
+otherCells <- as_tibble(colData(sce)) %>% 
+                group_by(cell.group.4) %>% 
+                distinct(ctypes) %>% 
+                filter(cell.group.4 == "otherCells")
+
+cell.group.7 <- sce$cell.group.4
+idxs <- which(cell.group.7 == "otherCells")
+cell.group.7[idxs] <- as.character(sce$ctypes[idxs]) # factor to character
+
+# fix typo
+cell.group.7[which(cell.group.7 == "Meyloid")] <-  "Myeloid"
+cell.group.7[which(cell.group.7 == "SynFib")] <- "Synovial Fibroblast"
+cell.group.7 <-  factor(cell.group.7)
+
+sce$cell.group.7 <- cell.group.7
+
+# table(sce$cell.group.7)
+# table(sce$cell.group.4)
+```
+
+```{r}
+logcounts <- transformGamPoi::shifted_log_transform(sce)
+logcounts(sce) <- logcounts
+
+#perform PCA, large matrix
+results <- irlba(logcounts, nv = 100)  
+
+```
+
+```{r}
+#calculate total variance explained by each principal component
+var.explained.sce <-  results$d^2 /sum(results$d^2)
+scree.plot.sce <- scree.plot(var.explained.sce, 50, 28, 28)
+# scree.plot.sce
+```
+
+```{r}
+fn <- glue("sce-pca.pdf")
+res.dir <- get.res.dir()
+
+ggsave(filename = file.path(res.dir, "plots", fn), device = "pdf", plot = scree.plot.sce, width = 9, height = 8)
+
+```
+
+# UMAP plot
+
+```{r}
+plot.cg <- function(hl.type, 
+                    sce, 
+                    umap,
+                    size.legend.text = 7,
+                    size.legend.title = 6) {
+  
+    # replace other cell types with others
+    mask <- sce$cell.group.7 == hl.type
+    cell.types.plot <- sce$cell.group.7 %>% as.character()
+    cell.types.plot[!mask] <- "others"
+    cell.types.plot <- factor(cell.types.plot, levels = c(hl.type, "others"))
+    
+    color.group <- c()
+    color.group[[hl.type]] <- "blue"
+    color.group[["others"]] <- "grey"
+  
+    plot <- as_tibble(colData(sce)) %>%
+      mutate(umap = umap) %>%
+      mutate(cell.types = cell.types.plot) %>%
+      
+      ggplot(aes(x = umap[,1], y = umap[,2])) +
+        geom_point(aes(color = cell.types), size = 0.5) +
+        scale_colour_manual(values = color.group) +
+      
+        theme(legend.text = element_text(size = size.legend.text),
+              legend.title = element_blank(),
+              legend.position = "bottom") + 
+      
+        small_axis("", fontsize = 5) + # utils from LEMUR
+        guides(color = guide_legend(override.aes = list(size = 1)))  
+    
+    return(plot)
+}
+
+# test
+unique.cg <- unique(sce$cell.group.7) %>% as.character()
+umap.huber <- scater::calculateUMAP(logcounts, scale = T, pca = 3)
+plot.cg(unique.cg[[1]], 
+        sce, 
+        umap.huber,
+        size.legend.text = 6)
+```
+
+```{r}
+PCs <- c(3, 10, 50)
+set.seed(1)
+for (nPC in PCs) {
+  umap.huber <- scater::calculateUMAP(logcounts, scale = T, pca = nPC)
+  reducedDim(sce, "UMAP_scater", withDimnames = FALSE) <- umap.huber
+  
+  plots <- lapply(unique.cg, function(x) plot.cg(x, sce, umap.huber))
+  plots.grid <- cowplot::plot_grid(plotlist = plots, ncol = 3, rel_heights = 80, rel_widths = 40)
+  
+  fn <- glue("sce-umap-{nPC}-PCs.pdf")
+  
+  ggsave(filename = file.path(res.dir, "plots", fn), device = "pdf", plot = plots.grid, width = 5.5, height = 4)
+}
+```
+
+# Save scRNA-seq data
+
+```{r}
+dir.data <- get.data.dir()
+sce.path <- file.path(dir.data, "scRNA-seq", "sce.qs")
+qsave(sce, sce.path)
+```
+
+# Misc.

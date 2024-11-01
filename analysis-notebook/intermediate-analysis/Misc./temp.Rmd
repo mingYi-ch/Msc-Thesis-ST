@@ -1,0 +1,503 @@
+---
+title: "Deconvolution"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(gghighlight)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+
+
+library(STdeconvolve)
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+# library(spacexr)
+library(purrr)
+
+# library(ggcorrplot)
+# library(imager)
+```
+
+```{r}
+source("../../src/util.R")
+source("../../config/config.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+dir <-  get.std.path()
+spe <- load.data(dir)
+
+pos <- spatialCoords(spe)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+```
+
+# Deconvolution
+
+```{r}
+target.cell <- "Endothelial Cells"
+target.cell <- "SynFib" 
+```
+
+```{r}
+# load reference data set
+dir.res <- get.res.dir()
+ref <- qread(file.path(dir.res, "SCE/sce.qs"))
+
+ctypes <- ref$cell.group.7
+which(unique(ctypes) == target.cell )
+
+ref.counts <- t(counts(ref)) # ctype x gene
+dim(ref.counts)
+
+```
+
+# std-poisson
+
+```{r}
+dir <- get.res.dir()
+res.stdp <- read.csv(file.path(dir, "deconvolution/std-poisson/deconProp.tsv"), sep = "\t", row.names = 1, header = TRUE)
+deconProp.stdp <- res.stdp %>% as.matrix()
+deconProp.stdp <- deconProp.stdp / rowSums(deconProp.stdp)
+
+feature.stdp <- read.csv(file.path(dir, "deconvolution/std-poisson/expected-features.tsv"), sep = "\t", row.names = 1, header = TRUE)
+deconGexp.stdp <- feature.stdp %>% as.matrix()
+mode(deconProp.stdp) <- "numeric"
+```
+
+```{r}
+genes.sel <- colnames(deconProp.stdp)
+ref.counts <- ref.counts[,genes.sel]
+
+# gene profiles
+dim(ref.counts)
+mean.na.rm <- partial(mean, na.rm = TRUE)
+rownames(ref.counts) <- ctypes
+ref.counts <- as.matrix(ref.counts) %>%
+            as.data.frame() %>%
+            mutate(ctypes = ctypes)
+  
+ref.gexp <- aggregate(.~ ctypes, data = ref.counts, FUN = mean.na.rm) %>% as.matrix()
+
+ctypes.unique <- ref.gexp[,1]
+cell.idx <- which(ctypes.unique == target.cell)
+ref.gexp <- ref.gexp[, -1]
+mode(ref.gexp) <- "numeric"
+
+ctypes.unique
+```
+
+```{r}
+
+colnames(deconProp.stdp) 
+```
+
+```{r}
+corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
+                          m1 = t(as.matrix(deconGexp.stdp)),
+                          # the reference `beta` (celltypes x genes)
+                          m2 = as.matrix(ref.gexp),
+                          # "b" = comparing beta matrices, "t" for thetas
+                          type = "b")
+## row and column names need to be characters
+rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
+
+correlationPlot2(mat = corMtx_beta,
+                colLabs = "Deconvolved cell-types",
+                rowLabs = "Ground truth cell-types",
+                title = "Transcriptional correlation", annotation = T, annotation_size = 4) +
+  ## this function returns a `ggplot2` object, so can add additional aesthetics
+ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
+                  axis.text.y = ggplot2::element_text(size = 8))
+
+# colnames(corMtx_beta) <- rownames(ref.gexp)
+rownames(corMtx_beta)
+colnames(corMtx_beta)
+matched.topic <- which.max(corMtx_beta[, cell.idx])
+matched.topic
+```
+
+```{r}
+plot.stdp <- vizTopic(theta = deconProp.stdp, pos = pos, topic = matched.topic, plotTitle = paste('std-poisson', matched.topic, target.cell, sep = " - "),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+plot.stdp
+```
+
+## STDeconvolve
+
+```{r}
+# select the LDA model of interest and get the beta (cell-type transcriptional profiles) and theta (cell-type barcode proportions) matrices.
+res.path <- "../../results/deconvolution/STDeconvolve/ldas.qs"
+if (!file.exists(res.path)) {
+  source("../../scripts/deconvolution/STDeconvolve.R")
+}
+ldas <- qs::qread(res.path)
+ldas$kneedOptK
+prior.k <- 7
+
+# ldas$kneedOptK
+optLDA <- optimalModel(models = ldas, opt = prior.k)
+results <- getBetaTheta(optLDA, perc.filt = 0.05, betaScale = 1000)
+deconProp <- results$theta
+deconGexp <- results$beta
+
+# qs::qsave(deconProp, )
+```
+
+```{r}
+## visualize deconvolved cell-type proportions
+# vizAllTopics(deconProp, pos[rownames(deconProp),], r=55, lwd=0)	  
+
+## interpret these cell-types based on their gene expression
+# topGenes(deconGexp)
+## top genes based on log 2 (fold change) for each cell-type
+get.marker.genes <-  function(i, n = 10, gexp = deconGexp) {
+  head(sort(log2(gexp[i,]/colMeans(gexp[-i,])), decreasing=TRUE), n = n)
+}
+```
+
+### Annotation strategy
+
+```{r}
+corMtx_beta <- getCorrMtx(# the deconvolved cell-type `beta` (celltypes x genes)
+                          m1 = as.matrix(deconGexp),
+                          # the reference `beta` (celltypes x genes)
+                          m2 = as.matrix(ref.gexp),
+                          # "b" = comparing beta matrices, "t" for thetas
+                          type = "b")
+```
+
+```{r}
+## row and column names need to be characters
+rownames(corMtx_beta) <- paste0("decon_", seq(nrow(corMtx_beta)))
+
+correlationPlot2(mat = corMtx_beta,
+                colLabs = "Deconvolved cell-types",
+                rowLabs = "Ground truth cell-types",
+                title = "Transcriptional correlation", annotation = T, annotation_size = 4) +
+  ## this function returns a `ggplot2` object, so can add additional aesthetics
+ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, vjust = 0, size = 6),
+                  axis.text.y = ggplot2::element_text(size = 8))
+
+# colnames(corMtx_beta) <- rownames(ref.gexp)
+rownames(corMtx_beta)
+colnames(corMtx_beta)
+matched.topic <- which.max(corMtx_beta[, cell.idx])
+matched.topic
+corMtx_beta[matched.topic, cell.idx]
+```
+
+```{r}
+plot.stdeconv <- vizTopic(theta = deconProp, pos = pos, topic = matched.topic, plotTitle = paste('STDeconv', matched.topic, target.cell, sep = " - "),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+```
+
+## RCTD
+
+```{r}
+# res.rctd <- readRDS(paste0(ref.dir, "SHK166_RCTD.rds"))
+dir <- get.res.dir()
+res.rctd <- qs::qread(file.path(dir, "deconvolution/RCTD/myRCTD.qs"))
+res.rctd <- res.rctd@results
+ctypes <- colnames(res.rctd$norm_weights)
+ctypes
+deconProp.rctd <- res.rctd$norm_weights %>% as.matrix()
+cell.idx.rctd <- which(colnames(deconProp.rctd) == target.cell )
+cell.idx.rctd
+```
+
+```{r}
+# pos
+# deconProp
+head(deconProp.rctd)
+# deconProp.rctd
+min(deconProp.rctd[,cell.idx.rctd])
+max(deconProp.rctd[,cell.idx.rctd])
+
+colnames(deconProp.rctd) <- seq_len(ncol(deconProp.rctd))
+plot.rctd <- vizTopic(theta = deconProp.rctd, pos = pos, topic = cell.idx.rctd, plotTitle = paste0("RCTD - ", target.cell),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+plot.rctd
+```
+
+## Cell2location
+
+```{r}
+dir <- get.res.dir()
+res.c2l <- read.csv(file.path(dir, "deconvolution/cell2loc/deconProp.csv"))
+deconProp.c2l <- res.c2l[,-1] %>% as.matrix()
+
+mode(deconProp.c2l) <- "numeric"
+cell.idx.c2l <- which(colnames(deconProp.c2l) == "Endothelial.Cells" )
+colnames(deconProp.c2l) 
+cell.idx.c2l
+```
+
+```{r}
+colnames(deconProp.c2l) <- seq_len(ncol(deconProp.c2l))
+rownames(deconProp.c2l) <- rownames(pos)
+
+plot.c2l <- vizTopic(theta = deconProp.c2l, pos = pos, topic = cell.idx.c2l, plotTitle = paste0("cell2loc - ", target.cell),
+         size = 1, stroke = 0, alpha = 0.5,
+         low = "white",
+         high = "red")
+
+plot.c2l
+```
+
+## Comparison
+
+### Average proportions Barplot
+
+```{r}
+avg.prop.bp <- function(deconProp, type) {
+  avg.prop <- colSums(deconProp) / nrow(deconProp)
+  bp <- barplot(
+    avg.prop,
+    names.arg = ctypes,
+    # names.arg = seq(length(avg.prop)),
+    las = 2,  # Rotate x-axis labels to be vertical
+    col = "lightblue",
+    main = paste0("Average Proportions by Cell Type - ", type)
+  )
+  return(bp)
+}
+
+plot1 <- avg.prop.bp(deconProp, "STDeconv") # STDeconv
+plot2 <- avg.prop.bp(deconProp.rctd, "RCTD") # STDeconv
+plot3 <- avg.prop.bp(deconProp.c2l, "Cell2Loc") # STDeconv
+plot4 <- avg.prop.bp(deconProp.stdp, "Cell2Loc") # STDeconv
+# ggsave(filename = "Average Proportions.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+# plots.grid
+```
+
+### Visualization of a certain cell type
+
+```{r}
+target.cell
+plots.grid <- wrap_plots(plot.stdeconv, plot.rctd, plot.c2l, plot.stdp)
+ggsave(filename = "Visualization of a certain cell type.pdf", plot = plots.grid, device = "pdf", width = 8, height = 6)
+
+plots.grid
+```
+
+```         
+```
+
+### Agreement on marker genes
+
+```{r}
+pred.mg <- get.marker.genes(matched.topic, n = 100)
+true.mg <- get.marker.genes(matched.topic, n = 100, gexp = ref.gexp)
+
+diff.genes <- intersect(names(pred.mg), names(true.mg))
+
+```
+
+# Utils
+
+```{r}
+vizTopic <- function(theta, pos, topic,
+                     groups = NA,
+                     group_cols = NA,
+                     size = 2,
+                     stroke = 0.3,
+                     alpha = 1,
+                     low = "white",
+                     high = "red",
+                     plotTitle = NA,
+                     showLegend = TRUE) {
+  
+  ## check that theta and pos are either data.frames or matrices
+  if( !is.matrix(theta) & !is.data.frame(theta) == FALSE ){
+    stop("`theta` must be a matrix or data.frame.")
+  }
+  if( !is.matrix(pos) == FALSE & !is.data.frame(pos) == FALSE ){
+    stop("`pos` must be a matrix or data.frame with exactly 2 columns named `x` and `y`.")
+  }
+  
+  if( (any(!colnames(pos) %in% c("x", "y")) == TRUE) | (dim(pos)[2] != 2) ){
+    stop("`pos` must have exactly 2 columns named `x` and `y`.")
+  }
+  
+  # ensure that `theta` and `pos` pixel rownames maintain same order
+  # after the merge so as to not mess up the order of `groups`
+  # if provided
+  # make sure only using the shared pixels
+  pixels <- intersect(rownames(theta), rownames(pos))
+  pixels <- rownames(theta)[which(rownames(theta) %in% pixels)]
+  
+  proportion <- theta[,topic]
+  dat <- merge(data.frame(proportion),
+               data.frame(pos), by=0)
+  
+  rownames(dat) <- dat[,"Row.names"]
+  ## make sure pixels in the original order before the merge
+  dat <- dat[pixels,]
+  
+  # color spots by group:
+  if (is.na(groups[1])) {
+    Groups <- " "
+  } else {
+    Groups <- as.character(groups)
+  }
+  if (is.na(group_cols[1])) {
+    group_cols <- c(" " = "black")
+  }
+  
+  p <- ggplot2::ggplot() +
+    ggplot2::geom_point(data = dat, ggplot2::aes(x=x, y=y, fill=proportion, color = Groups),
+                        shape = 21,
+                        stroke = stroke, size = size, 
+                        alpha = alpha) +
+    ggplot2::scale_color_manual(values = group_cols)
+  
+  p <- p +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.line = ggplot2::element_blank(),
+      axis.text.x = ggplot2::element_blank(),
+      axis.text.y = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      axis.title.x = ggplot2::element_blank(),
+      axis.title.y = ggplot2::element_blank(),
+      panel.background = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 12, colour = "black"),
+      legend.title = ggplot2::element_text(size = 12, colour = "black")
+    ) +
+    
+    ggplot2::scale_fill_gradientn(limits = c(0, 1.0),
+                                  breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                                  colors=(grDevices::colorRampPalette(c(low, high)))(n = 209)
+    ) +
+    
+    ggplot2::guides(fill = ggplot2::guide_colorbar(title = "Proportion",
+                                                   title.position = "left",
+                                                   title.hjust = 0.5,
+                                                   ticks.colour = "black",
+                                                   ticks.linewidth = 2,
+                                                   frame.colour= "black",
+                                                   frame.linewidth = 2,
+                                                   label.hjust = 0,
+                                                   title.theme = ggplot2::element_text(angle = 90)
+    ))
+  
+  if (!showLegend) {
+    p <- p + ggplot2::theme(legend.position = "none")
+  }
+  
+  if (!is.na(plotTitle)) {
+    p <- p + ggplot2::ggtitle(plotTitle)
+  }
+  
+  p <- p + ggplot2::coord_equal()
+  
+  return(p)
+  
+}
+
+```
+
+```{r}
+hist(deconProp[, matched.topic], breaks = 5)
+```
+
+# Misc
+
+```{r}
+library(igraph)
+
+# Create a sample graph (you can replace this with your own graph)
+g <- graph.ring(10)
+g <- add_vertices(g, 3, color = "red")
+plot(g)
+
+# Check if vertices 1 and 2 are connected
+are.connected(g, 1, 12)  # TRUE
+
+cl <- components(g)
+class(cl)
+
+```
+
+```{r}
+# Create a simple unweighted graph
+# Example edge list
+edges <- data.frame(from = c(0, 1, 1, 2), to = c(1, 2, 3, 3))
+
+# Create a graph from the edge list
+graph <- graph.data.frame(edges, directed = FALSE)  # Adjust 'directed' as needed
+
+
+# Specify source and target vertices
+source <- 1
+target <- 3
+
+# Find the shortest path
+shortest_paths <- shortest_paths(graph, from = source, to = target)
+shortest_paths$vpath
+# Check if a path exists
+if (length(shortest_paths) > 0) {
+    # Access the first shortest path (modify as needed)
+    shortest_path <- shortest_paths[[1]]
+
+    cat("Shortest path:", shortest_path)
+} else {
+    cat("No path exists between", source, "and", target)
+}
+
+
+```
+
+```{r}
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolution_topic_features_k10.csv"
+deconvolution_topic_features_k10 <- read.csv(path)
+head(deconvolution_topic_features_k10)
+colnames(deconvolution_topic_features_k10)
+
+path <- "/shares/rheumatologie.usz/caroline/spatial/SHK166_RA_Knee/deconvolution/deconvolution_k10/deconvolved_spots_k10.csv"
+deconvolved_spots_k10 <- read.csv(path)
+head(deconvolved_spots_k10)
+```
+
+```{r}
+# Create a matrix (you can replace this with your own data)
+my_matrix <- matrix(c(1, 2, 3, 4, 5, 6, 3, 3, -Inf), ncol = 3)
+
+# Calculate row minimums, ignoring NA values
+row_mins <- rowMins(my_matrix, na.rm = TRUE)
+
+# Print the result
+print(row_mins)
+
+```
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>

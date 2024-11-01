@@ -3,6 +3,36 @@ library(igraph)
 library(ggplot2)
 library(jsonlite)
 library(scales)
+
+
+scree.plot <- function(var_explained, 
+                       n_pc = 50,
+                       size.axis.text = 16,
+                       size.axis.title = 18) {
+  #create scree plot
+  df <- data.frame(
+    PC = 1:n_pc,               
+    var_prop = var_explained[1:n_pc]
+  )
+  
+  scree.plot <- ggplot(df, aes(x = PC, y = var_prop)) + 
+    geom_bar(stat = "identity", width = 0.9) +  # Ensure bars represent actual data
+    xlab("Index of ordered PC") + 
+    ylab("Percentage of variance explained") +
+    ylim(0, 1) +  # Set y-axis limits between 0 and 0.75 (adjust as needed)
+    scale_x_continuous(breaks = c(10, 20, 30, 50, 90)) +
+    theme(
+      # legend.text = element_text(size = size.axis.title),
+      axis.title.x = element_text(size = size.axis.title),
+      axis.title.y = element_text(size = size.axis.title),
+      axis.text.x = element_text(size = size.axis.text),  
+      axis.text.y = element_text(size = size.axis.text),
+      legend.position = "bottom")
+  
+  return(scree.plot)
+}
+
+
 # Function to calculate the average distance for each cluster
 calculate.avg.dist <- function(x) {
   # Remove square brackets and parentheses
@@ -51,28 +81,12 @@ stat_func_median <- function(data, indices) {
 #     mutate(origin = origin, symbol = gene)
 # }
 
+mean_stat <- function(data, indices) {
+  return(mean(data[indices], na.rm = TRUE))
+}
+
 perform_bootstrapping_func <- function(origin, genes_of_interest, sce.pseudo, stat_func) {
-  # # mask for if a spot is in neighborhood
-  # mask <- matrix(NA, nrow = length(genes_of_interest), ncol = ncol(fit_all), 
-  #                dimnames = list(genes_of_interest, colnames(fit_all)))
-  # 
-  # mask2 <- matrix(1, nrow = length(genes_of_interest), ncol = ncol(fit_all), 
-  #                 dimnames = list(genes_of_interest, colnames(fit_all)))
-  # 
-  # for(id in genes_of_interest){
-  #   mask[id, filter(nei, name == id)$neighborhood[[1]]] <- 1
-  #   mask2[id, filter(nei, name == id)$neighborhood[[1]]] <- NA
-  # }
-  # 
-  # 
-  # # construct two assays: inside and outside
-  # sce.pseudo <- SingleCellExperiment(
-  #   list(inside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask),
-  #        outside = as.matrix(logcounts(fit_all)[genes_of_interest,,drop=FALSE] * mask2)
-  #   ),
-  #   colData = as.data.frame(colData(fit_all))
-  # )
-  
+
   res <- tibble(expr = as.data.frame(assay(sce.pseudo, origin)[genes_of_interest,])) %>% 
     mutate(dist.cluster = sce.pseudo$dist.cluster) %>% 
     group_by(dist.cluster) %>% 
@@ -119,7 +133,7 @@ perform_bootstrapping_func <- function(origin, genes_of_interest, sce.pseudo, st
   return(res)
 }
 
-lemur_nei_plot <- function(spe, nei, fit, gene_of_interest) {
+lemur_nei_plot <- function(spe, nei, fit, gene_of_interest, target.cell, is.ec.spot) {
   # refactor to a func
   is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
     left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
@@ -236,13 +250,14 @@ lemur_curve_plot <- function(nei, fit, gene_of_interest, spe, stat_func) {
     geom_boxplot(aes(color = origin), width = 0.3, outlier.shape = NA) +  # Add boxplot
     geom_smooth(aes(color = origin, x = as.numeric(avg.dist), y = expr), method = 'lm', formula = y ~ ns(x, df = df), se = FALSE, linewidth = 0.5) +
     # geom_errorbar(aes(ymin = lower, ymax = upper, color = origin), width = 0.8, alpha = 0.5) +
-    scale_color_manual(values = c("inside" = "black", "outside" = "lightgrey"), labels = c("inside" = "spots in neighborhood", "outside" = "All other spots")) +
-    scale_x_discrete(breaks = unique(comparison_data$avg.dist)) +  # Show all x values
+    scale_color_manual(values = c("inside" = "blue", "outside" = "lightblue"), labels = c("inside" = "spots in neighborhood", "outside" = "All other spots")) +
+    # scale_x_discrete(breaks = unique(comparison_data$avg.dist)) +  # Show all x values
+    scale_x_discrete(breaks = unique(comparison_data$avg.dist), labels = c(0, 100, 200, 350)) +  # Show all x values
     scale_y_continuous(limits = c(y_min, y_max), expand = expansion(add = y_expansion)) +
-    guides(x = guide_axis(angle = 45)) +
+    guides(x = guide_axis(angle = 0)) +
     
     labs(color = "",
-         x = "avg.dist / spots",
+         x = "avg.dist (μm)",
          y = "Log Expr.",
          subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell"))  +
     
