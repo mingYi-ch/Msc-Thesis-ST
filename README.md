@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Msc-Thesis-ST
-=======
 # Counterfactual-prediction based analysis of spatial transcriptomics
 
 This study explores the application of a novel method called LEMUR (*Ahlmann-Eltze and Huber (2023a)*) on spatial transcriptomics, emphasizing counterfactual prediction and differential gene expression analysis without relying on predefined discrete clusters. Utilizing this approach allows for the analysis of data-driven neighborhood clusters through counterfactual predictions of the top 200 marker genes of synovial fibroblast, revealing likely four synovial fibroblast subtypes that correspond well with known studies from scRNA-seq data (*Micheroli et al. (2022)*). Employing a data transformation technique validated by (*Ahlmann-Eltze and Huber (2023b)*) with excellent performance, on our reference scRNA-seq data set, we also demonstrate the dynamic changes in UMAP visualizations with different number of principal component inputs, elucidating the relationships among various cell and sub-cell types. The detailed report can be found on [overleaf](https://www.overleaf.com/read/yczfttmfrxfz#c1f5db).
