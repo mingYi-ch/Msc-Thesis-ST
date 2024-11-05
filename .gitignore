@@ -4,6 +4,8 @@
 .Ruserdata
 renv
 
+.ipynb_checkpoints
+
 *.png
 *.svg
 *.pdf
