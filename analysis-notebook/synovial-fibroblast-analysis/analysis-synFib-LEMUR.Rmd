@@ -1,0 +1,198 @@
+---
+title: "R Notebook"
+---
+
+# Library
+
+```{r}
+library(tidyverse)
+library(SingleCellExperiment)
+library(lemur)
+library(SpatialExperiment)
+library(patchwork)
+
+library(boot)
+library(Seurat)
+library(tidyr) 
+library(qs) 
+library(glue) 
+library(splines)
+```
+
+```{r}
+source("../../src/util.R")
+source("../../config/config.R")
+```
+
+# Load data
+
+```{r}
+res.dir <- get.res.dir()
+res.dir.LEMUR <- file.path(get.res.dir(), "LEMUR")
+
+# fit <- qs::qread(file.path(res.dir.LEMUR, "fit_small.qs"))
+fit <- qs::qread(file.path(res.dir.LEMUR, "fit.qs"))
+
+# nei <- qs::qread(file.path(res.dir.LEMUR, "nei_small.qs"))
+nei_all <- qs::qread(file.path(res.dir.LEMUR, "nei.qs"))
+
+spe <- qs::qread(file.path(res.dir.LEMUR, "se_dist.qs"))
+spe
+```
+
+# Analysis
+
+```{r}
+marker.genes <- qread(file.path(res.dir, "markers.qs"))
+markers.SynFib <- marker.genes %>% 
+              filter(cluster == "Synovial Fibroblast") %>%
+              filter(pct.1 > 0.25 & pct.2 >= 0 & avg_log2FC >= 0.5) %>%  # Marlia
+              top_n(n = 200, wt = avg_log2FC) %>% 
+              pull(gene)
+
+"THY1" %in% markers.SynFib
+```
+
+```{r}
+nei <- nei_all %>% filter(name %in% markers.SynFib)
+# idx <- nei$sel_statistic %>% which.min()
+
+# gene_of_interest <- markers.SynFib %>% sample(1)
+# gene_of_interest <- "THY1"
+gene_of_interest <- "PRG4"
+```
+
+```{r}
+is_inside <- tibble(symbol = gene_of_interest, cell_id = list(colnames(fit))) %>%
+  left_join(dplyr::select(nei, name, neighborhood), by = c("symbol"= "name")) %>%
+  mutate(inside = map2(cell_id, neighborhood, \(ref, nei_spots) ref %in% nei_spots)) %>%
+  dplyr::select(-neighborhood) %>%
+  unnest(c(inside, cell_id))
+
+qs::qsave(is_inside, file.path(res.dir, "is_inside.qs"))
+```
+
+## Dist bins in UMAP
+
+```{r}
+umap <- reducedDim(spe, "umap_sel")
+```
+
+```{r}
+as_tibble(colData(fit)) %>%
+  mutate(umap = umap[colnames(fit),]) %>%
+  ggplot(aes(x = umap[,1], y = umap[,2])) +
+    geom_point(aes(color = dist.cluster), size = 0.7, stroke = 0) +
+    guides(color = guide_legend(override.aes = list(size = 1)))
+```
+
+## Neighborhood in UMAP
+
+```{r}
+size.legend.title <- 10
+size.legend.text <- 8
+
+
+# predicted DE
+de_plot_data <- as_tibble(colData(fit), rownames = "cell_id") %>%
+  mutate(umap = umap[colnames(fit),]) %>%
+  mutate(de = as_tibble(t(assay(fit[gene_of_interest,], "DE")))) %>%
+  unnest(de, names_sep = "-") %>%
+  pivot_longer(starts_with("de-"), names_sep = "-", values_to = "de", names_to = c(NA, "symbol")) %>%
+  inner_join(is_inside, by = c("symbol", "cell_id")) %>%
+  sample_frac(size = 1)
+
+abs_max <- max(abs(quantile(de_plot_data$de, c(0.95, 0.05))))
+
+dist_de_pl <- de_plot_data %>%
+  mutate(inside = ifelse(inside, "in", "out")) %>%
+  mutate(inside = factor(inside, levels = c("in", "out")))  %>%
+  ggplot(aes(x = umap[,2], y = umap[,1])) +
+    ggrastr::rasterise(geom_point(aes(color = de), size = 0.5, stroke = 0), dpi = 600) +
+    # scale_colour_gradient2_rev(limits = c(-1, 1) * abs_max, oob = scales::squish, breaks = c(-1, 0, 1) * signif_to_zero(abs_max, 1), mid = "lightgrey") +
+    scale_color_de_gradient(abs_max, mid_width = 0.2) +
+    facet_grid(vars(inside), labeller = labeller(inside = as_labeller(c("in" = "spots in Neighb.", "out" = "all other spots"))),
+               switch="y") +
+    small_axis("", fontsize = font_size_small) +
+    theme(legend.position = "bottom", legend.margin = margin(t = -2, unit = "mm"), strip.text = element_text(size = size.legend.title), legend.title = element_text(size = size.legend.title), legend.text = element_text(size = size.legend.text)) +
+    guides(color = guide_colorbar(barheight = unit(1, "mm"), barwidth = unit(15, "mm"), title.vjust = 1)) +
+    labs(color = "predicted DE")
+
+dist_de_pl
+```
+
+```{r}
+filename <- glue("nei in umap - {gene_of_interest}.pdf")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = dist_de_pl, width = 4, height = 6)
+```
+
+```{r, paged.print=FALSE}
+# calculate the frac inside origin group!!
+rel_plt <- colData(fit) %>%
+  as_tibble(rownames = "cell_id") %>%
+  left_join(is_inside) %>%
+  dplyr::count(dist.cluster, symbol, inside) %>%
+  mutate(frac = n / sum(n), .by = c(symbol, inside)) %>%  # calculate the frac inside origin group!!
+  mutate(dist.cluster = fct_relabel(dist.cluster, \(x) str_replace(x, ",", ", "))) %>%
+  ggplot(aes(x = dist.cluster, y = frac)) +
+    geom_col(aes(fill = inside), position = position_dodge2()) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    scale_x_discrete(position = "top") +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "lightgrey")) +
+    guides(x = guide_axis(angle = 90)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Rel. No. spots - Group-Wise Fractions")
+
+rel_plt 
+
+# calculate the frac overall: divide by total amount of spots
+rel_plt_2 <- colData(fit) %>%
+  as_tibble(rownames = "cell_id") %>%
+  left_join(is_inside) %>%
+  dplyr::count(dist.cluster, symbol, inside) %>%
+  mutate(total_n = sum(n), .by = symbol) %>%  # Calculate total count per symbol
+  mutate(frac = n / total_n, .by = c(symbol, inside)) %>%  # calculate the frac inside origin group!!
+  mutate(dist.cluster = fct_relabel(dist.cluster, \(x) str_replace(x, ",", ", "))) %>%
+  ggplot(aes(x = dist.cluster, y = frac)) +
+    geom_col(aes(fill = inside), position = position_dodge2()) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+    scale_x_discrete(position = "top") +
+    scale_fill_manual(values = c("TRUE" = "black", "FALSE" = "lightgrey")) +
+    guides(x = guide_axis(angle = 90)) +
+    theme(axis.title.x = element_blank(), legend.position = "bottom") +
+    labs(color = "", y = "Rel. No. spots - Overall Fractions")
+
+rel_plt_2
+```
+
+## Correlation plot
+
+```{r}
+# bootstrapping for mean or median
+expr_comparison_pl <- lemur_curve_plot(nei, fit,  gene_of_interest, spe, stat_func_mean)
+expr_comparison_pl
+```
+
+```{r}
+filename <- glue("correlation plot of dists - {gene_of_interest}.pdf")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = expr_comparison_pl, width = 6, height = 4)
+```
+
+# Plot ECs and neighborhood
+
+```{r}
+target.ctype <- "ECs"
+filename <- glue("ECs_manually_marker_final.qs")
+is.ec.spot <- qread(file.path(res.dir, "deconvolution", filename))
+
+plots_ECs_nei <- lemur_nei_plot(spe, nei, fit, gene_of_interest, target.ctype, is.ec.spot)
+```
+
+```{r}
+filename <- glue("ECs and nei - {gene_of_interest}.svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_ECs_nei, device = "svg", width = 6, height = 4)
+
+plots_ECs_nei
+```
+
+# Misc.

@@ -1,0 +1,8 @@
+scanpy
+anndata
+pandas
+numpy
+matplotlib
+scvi
+seaborn
+pyreadr

@@ -1,0 +1,385 @@
+------------------------------------------------------------------------
+
+---
+title: "LEMUR"
+output:
+  html_document:
+    df_print: paged
+output.width: "75%"
+---
+
+# Library
+
+```{r}
+library(Matrix)
+library(ggplot2)
+library(tidyverse)
+library(stringr)
+
+library(SpatialExperiment)
+library(lemur)
+library(igraph)
+library(qs)
+
+library(dplyr)
+library(Seurat)
+library(png)
+library(glue)
+library(grid)
+library(EBImage)
+library(jsonlite)
+library(magick)
+
+
+
+
+```
+
+```{r}
+source("../src/util.R")
+source("../config/config.R")
+source("../src/annotate_by_markers.R")
+```
+
+# Load data
+
+```{r}
+set.seed(5)
+```
+
+```{r}
+dir <- get.data.dir()
+res.dir <- get.res.dir()
+
+dir.data.processed <- file.path(dir, "processed")
+spe <- qread(file.path(dir.data.processed, "spe_clean.qs"))
+```
+
+```{r}
+# wether use the deconvolution model
+use.model <- F
+
+# model results
+if (use.model) {
+  deconProp <- qread(file.path(res.dir, "deconvolution/deconProp_best.qs"))
+}
+
+filename <- glue("ECs_manually_marker_final.qs")
+is.ec.spot <- qread(file.path(res.dir, "deconvolution", filename))
+```
+
+# Define covariate
+
+## Proximity to a specific cell type
+
+```{r}
+pos <- spatialCoords(spe)
+pos <- pos[, c('x','y')]
+pos <- as.matrix(pos)
+```
+
+```{r}
+# Define target cell types
+if (use.model) {
+  topic.target <- "2"
+  prop.threshold <- 0.2
+  weight <- NULL
+  
+  deconProp_target <- deconProp[,topic.target]
+  deconProp_target <- deconProp_target[deconProp_target > prop.threshold]
+  
+  length(deconProp_target)
+  bc.target <- names(deconProp_target)
+  pos.target <-  pos[bc.target,]
+  weights <- deconProp_target
+  
+}else{
+  bc.target <- colnames(spe)[is.ec.spot]
+  pos.target <-  pos[bc.target,]
+  weights <- rep(1, length(bc.target))
+}
+```
+
+```{r}
+adjacency.matrix <- get.adjacency.matrix(pos, squared.radius = 9000)
+sum(adjacency.matrix)
+```
+
+```{r}
+# build a graph
+g <- graph_from_adjacency_matrix(adjacency.matrix, mode = 'undirected')
+
+bc.idxs <- seq_along(pos[ ,1])
+target.idxs <- which(rownames(pos) %in% bc.target)
+setdiff(bc.target, colnames(spe)[target.idxs])
+
+# get all min dists to target
+start_time <- Sys.time()
+dists.mat <- get.all.dists(g, bc.idxs, target.idxs)
+end_time <- Sys.time()
+
+execution_time <- end_time - start_time
+message("Sys.time execution time:", execution_time)
+
+```
+
+```{r}
+re.run <- T
+res.dir.LEMUR <- file.path(get.res.dir(), "LEMUR")
+
+if (re.run) {
+  min.dists <- get.min.dists(dists.mat, weights, normalize = F)
+  names(min.dists) <- colnames(spe)
+  spe$min.dists <- min.dists
+  
+  table(min.dists)
+  
+  # save min.dists
+  if (!dir.exists(res.dir.LEMUR)) {
+    dir.create(res.dir.LEMUR)
+  }
+  qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
+}else{
+  spe <- qread(file.path(res.dir.LEMUR, "se_dist.qs"))
+}
+
+# remove spots far away from ECs
+dist.cutoff <- 4.5
+spots.sel <- spe$min.dists <= dist.cutoff
+spe.subset <- spe[, spots.sel]
+```
+
+## Visualize Dists to targets
+
+```{r}
+# maually by marker
+cluster <-  "Endothelial Cells"
+marker.sel <- NA
+
+method <- paste0("Manually by marker ", marker.sel)
+
+# set for ECs 
+groups <- rep("others", ncol(spe))
+names(groups) <- colnames(spe)
+groups[bc.target] <- cluster
+min.dists <- spe$min.dists
+strokes <- ifelse(groups == cluster, 0.5, 0)
+
+# set spots for spots futher than 8
+min.dists.sel <-  ifelse(spots.sel, spe$min.dists, NA)
+
+# Create ggplot object
+plots <- as_tibble(spatialCoords(spe)) %>%
+  mutate(min.dists = min.dists.sel, groups = groups, strokes = strokes) %>%
+  ggplot(aes(x = x, y = y, shape = groups, fill = min.dists)) +
+  geom_point(aes(stroke = strokes), size = 2, alpha = 0.7, color = "black") +
+  scale_shape_manual(values = c(24, 21)) +
+  scale_fill_gradient(low = "white", high = "blue", na.value = "grey") +
+  labs(title = paste0("Min.Dists", " to ", "ECs from ", method),
+       x = "pxl_row_in_fullres",
+       y = "pxl_col_in_fullres",
+       fill = paste0("Min.Dists"))
+
+filename <- paste0("Min.Dists", " to ", "ECs from ", method,  ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
+
+plots
+```
+
+# Run LEMUR
+
+```{r}
+identify.groups <- function(x, min_spots = 65) {
+  x_counts <- as.data.frame(table(x))
+  colnames(x_counts) <- c("min.dist", "count")
+  x_counts$min.dist <- x_counts$min.dist %>% 
+                          as.character() %>% 
+                          as.numeric()
+  
+  num_row <- nrow(x_counts)
+  groups <- c()
+  i <- 1
+  while (i <= num_row) {
+    if (x_counts$count[i] >= min_spots) {
+      groups <- c(groups, x_counts$min.dist[i])
+      i <- i + 1
+    } else {
+      if (i == 1)   groups <- c(groups, 0)
+      sum <- x_counts$count[i]
+      start_i <- i
+      
+      # aggeregate backwards till reach min_spots
+      while (sum < min_spots && i < num_row) {
+        i <- i + 1
+        sum <- sum + x_counts$count[i]
+      }
+      
+      #  insert different intervals under different conditions
+      if (sum < min_spots && i >= num_row) {
+        groups <- c(groups, x_counts$min.dist[num_row])
+      } else if (sum >= min_spots && i >= num_row){
+        groups <- c(groups, x_counts$min.dist[start_i], x_counts$min.dist[num_row])
+      } else if(start_i != 1) {
+        groups <- c(groups, x_counts$min.dist[start_i])
+      }
+      
+      i <- i + 1
+    }
+    # message(i)
+  }
+  return(groups)
+}
+
+identify.groups(spe.subset$min.dists)
+
+x_counts <- as.data.frame(table(spe.subset$min.dists))
+colnames(x_counts) <- c("min.dist", "count")
+
+```
+
+```{r}
+# no dist bin for  min_spots > 60
+bin.dists3 <- function(x, add_label = TRUE, label_fmt = "%.3f", min_spots){
+  groups <- identify.groups(x, min_spots)
+  n <- length(groups) - 1
+  res <- rep(NA_integer_, length(x))
+  labels <- rep(NA_character_, n)
+  
+  # groups <- c(groups, Inf)
+  # res[is.infinite(x)] <- n + 1
+  # labels[n + 1] <- "Inf"
+  
+  for(idx in seq_len(n)){
+    if(idx == n){
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), "]")
+      res[x >= groups[idx] & x <= groups[idx+1]] <- idx
+    }else{
+      labels[idx] <- paste0("[", sprintf(label_fmt, groups[idx]), ",", sprintf(label_fmt, groups[idx+1]), ")")
+      res[x >= groups[idx] & x < groups[idx+1]] <- idx
+    }
+  }
+  if(add_label){
+    factor(res, levels = seq_len(n), labels = labels)
+  }else{
+    res
+  }
+}
+
+```
+
+```{r}
+# groups <- c(0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.35, 0.6, 1.0)
+# spe.subset$dist.cluster <- bin.dists2(spe.subset$min.dists, groups = groups, label_fmt = "%.3f")
+
+min_spots <- 65
+spe.subset$dist.cluster <- bin.dists3(spe.subset$min.dists, label_fmt = "%.f", min_spots = min_spots)
+table(spe.subset$dist.cluster)
+
+# save undropped 
+spe$dist.cluster <- bin.dists3(spe$min.dists, label_fmt = "%.f", min_spots = min_spots)
+qs::qsave(spe, file.path(res.dir.LEMUR, "se_dist.qs"))
+table(spe$dist.cluster)
+
+# check dist.cluster is correct
+as_tibble(colData(spe.subset)) %>% group_by(dist.cluster) %>%
+  filter(dist.cluster == "[1,2)")
+
+```
+
+```{r}
+strsplit("15,Inf", ",")[[1]] %>% as.numeric()
+gsub("[\\[\\]()]", "", "[2,3)")
+str_replace_all("[15,Inf]", "[\\[\\]()]", "")
+                
+# Function to calculate the average distance for each cluster
+calculate.avg.dist <- function(x) {
+  # Remove square brackets and parentheses
+  cleaned_str <- str_replace_all(x, "[\\[\\]()]", "")
+  
+  # Convert the cleaned string to numeric values
+  numeric_values <- strsplit(cleaned_str, ",")[[1]] %>% as.numeric()
+  
+  avg <- mean(numeric_values)
+  if (!is.finite(avg)) {
+    avg <- numeric_values[1]
+  }
+  
+  return(avg)
+}
+
+# Example usage of the function
+calculate.avg.dist("[15,Inf]")
+spe.subset$avg.dist <- lapply(as.character(spe.subset$dist.cluster), calculate.avg.dist)
+```
+
+```{r}
+# Create the bar plot using ggplot2
+plots <- as_tibble(spe.subset$dist.cluster) %>% 
+  ggplot(aes(x = value)) +
+    geom_bar(fill = "skyblue") +
+    theme_minimal() +
+    labs(title = "Frequency of dists in each bin",
+         x = "Bin",
+         y = "Frequency") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+filename <- paste0("Bar plot of Frequency of dists in each bin", ".svg")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "svg", width = 10, height = 8)
+
+filename <- paste0("Bar plot of Frequency of dists in each bin", ".png")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = "png", width = 10, height = 8, dpi = 500)
+
+plots
+```
+
+```{r}
+spe.subset
+```
+
+```{r}
+set.seed(1)
+
+fit <- lemur::lemur(spe.subset, design = ~ dist.cluster, n_embedding = 30, test_fraction = 0.6)
+fit <- lemur::align_harmony(fit)
+```
+
+```{r}
+table(spe.subset$dist.cluster)
+bin.levels <- levels(spe.subset$dist.cluster)
+
+# DE is signed
+idx.1 <- 1
+idx.2 <- length(bin.levels) - 1
+
+fit <- lemur::test_de(fit, cond(dist.cluster = bin.levels[idx.1]) - cond(dist.cluster = bin.levels[idx.2]))
+
+set.seed(1)
+DE <- assay(fit, "DE")
+dim(DE)
+qs::qsave(fit, file.path(res.dir.LEMUR, "fit.qs"))
+```
+
+```{r}
+set.seed(5)
+nei <- lemur::find_de_neighborhoods(fit, 
+                                    group_by = vars(dist.cluster), 
+                                    min_neighborhood_size = 20,
+                                    selection_procedure = "zscore",
+                                    directions  = "contrast",
+                                    make_neighborhoods_consistent = F,
+                                    add_diff_in_diff = T,
+                                    test_method = "none") # test diff between in/outside neibourhood
+fit$test_data
+qs::qsave(nei, file.path(res.dir.LEMUR, "nei.qs"))
+filter(nei, name == "PRG4")
+```
+
+
+# Misc.
+
+
+# Reference
+
+-   Tutorial from Prof. Jean Fan, <https://jef.works/blog/2023/05/29/stdeconvolve-breast-cancer/>
+
+-   STdeconvolve Vignettes, <https://www.bioconductor.org/packages/release/bioc/vignettes/STdeconvolve/inst/doc/vignette.html#spatialexperiment-inputs>
