@@ -22,7 +22,7 @@ library(igraph)
 library(qs)
 library(glue)
 
-# library(spacexr)
+library(xtable)
 library(purrr)
 library(gridExtra)
 
@@ -51,10 +51,10 @@ pos <- spatialCoords(spe)
 pos <- pos[, c('x','y')]
 pos <- as.matrix(pos)
 
-res.dir <- get.res.dir()
+data.dir <- get.data.dir()
 
 # load reference data set
-ref <- qread(file.path(res.dir, "SCE/sce.qs"))
+ref <- qread(file.path(data.dir, "scRNA-seq/sce.qs"))
 ```
 
 ```         
@@ -77,9 +77,9 @@ threshold <- 5
 # Endothelial Cells
 target.cell <- "Endothelial Cells"
 
-marker.sel <- "VWF"
-threshold <- 2
 marker.sel <- "PECAM1"
+threshold <- 2
+marker.sel <- "VWF"
 threshold <- 2
 ```
 
@@ -90,8 +90,18 @@ table(marker.genes$cluster)
 markers <- marker.genes %>% 
               group_by(cluster) %>%
               top_n(n = 100, wt = avg_log2FC) %>% 
-              filter(cluster == target.cell & pct.1 > 0.25 & pct.2 >= 0) 
-head(markers, n = 10)
+              filter(cluster == target.cell & pct.1 > 0.25 & pct.2 >= 0) %>% 
+              ungroup() %>% 
+              select(-cluster) %>% 
+              arrange(desc(pct.1)) %>% 
+              mutate(
+                avg_log2FC = sprintf("%.3f", avg_log2FC),
+                p_val = sprintf("%.3f", p_val),
+                p_val_adj = sprintf("%.3f", p_val_adj)
+              ) %>% 
+              select(gene, pct.1, pct.2, avg_log2FC, p_val, p_val_adj)
+
+head(markers, n = 10) %>% xtable()
 
 gexp.target <- counts(spe)[marker.sel, ]
 marker.sel %in% rownames(marker.genes)
@@ -177,15 +187,14 @@ plots_marker_sp_bar <- as_tibble(gexp.target) %>%
   ggplot(aes(x = value)) +
     geom_bar(fill = "skyblue") +
     theme_minimal() +
-    labs(title = paste0("Frequency of ", marker.sel, " in spatial data"),
+    labs(
          x = "UMI",
          y = "Frequency")
 
-filename <- paste0("Bar plot of Frequency of ", marker.sel, ".svg")
-ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_marker_sp_bar, device = "svg", width = 10, height = 8)
+marker.sel
 
-filename <- paste0("Bar plot of Frequency of ", marker.sel, ".png")
-ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_marker_sp_bar, device = "png", width = 10, height = 8, dpi = 500)
+filename <- paste0("Bar plot of Frequency of ", marker.sel, ".pdf")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = plots_marker_sp_bar, width = 4, height = 3)
 
 is.ec.spot <- (gexp.target > threshold)
 dim(is.ec.spot)

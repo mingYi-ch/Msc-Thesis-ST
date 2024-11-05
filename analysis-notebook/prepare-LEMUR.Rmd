@@ -186,7 +186,7 @@ ggsave(filename = file.path(res.dir, "plots", filename), plot = plots, device = 
 plots
 ```
 
-# Prepare LEMUR
+# Run LEMUR
 
 ```{r}
 identify.groups <- function(x, min_spots = 65) {
@@ -374,47 +374,9 @@ qs::qsave(nei, file.path(res.dir.LEMUR, "nei.qs"))
 filter(nei, name == "PRG4")
 ```
 
-## Cluster by THY1
-
-```{r}
-gene_of_interest <- c("THY1", "PSD3")
-gene_of_interest <- "THY1"
-
-DE.THY1 <- assay(fit, "DE")[gene_of_interest,]
-hist(DE.THY1, main = "predicted DE.THY1 hist", xlab = "DE.THY1", ylab = "Frequency")
-thy1.threshold <- 1
-
-neighborhood.bcs <- names(DE.THY1[DE.THY1 > thy1.threshold])
-
-nei.thy1 <- data.frame(
-  name = gene_of_interest,
-  neighborhood = I(list(I(neighborhood.bcs))),
-  n_cells = length(neighborhood.bcs),
-  sel_statistic = NA
-)
-
-# nei <- nei.thy1
-```
-
-```{r}
-# target gene  THY1, and postn+ markers
-target.genes <- c("THY1", "PSD3")
-
-fit_small <- fit[target.genes,]
-fit_small
- 
-nei_small <- nei %>% filter(name %in% target.genes)
-nei_small["FNDC1", "neighborhood"] <- nei.thy1$neighborhood
-nei_small["PSD3", "neighborhood"] <- nei.thy1$neighborhood
-
-qs::qsave(fit_small, file.path(res.dir.LEMUR, "fit_small.qs"))
-qs::qsave(nei_small, file.path(res.dir.LEMUR, "nei_small.qs"))
-```
 
 # Misc.
 
-```         
-```
 
 # Reference
 

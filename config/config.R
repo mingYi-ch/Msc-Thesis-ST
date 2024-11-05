@@ -1,8 +1,10 @@
 # set project dir for local and S3IT
 host <- "local"
-if (dir.exists("/home/myi")) {
+if (dir.exists("/home/myi")) { # !! change it to your own directory
   host <- "cluster"
 }
+
+# !! change it to your own directory
 proj.dir.local <- "/Users/Yi/Library/Mobile\ Documents/com~apple~CloudDocs/Master-thesis/Msc-Thesis-ST"
 proj.dir.cluster <- "/data/myi/mt-spatial-transcriptomics"
 

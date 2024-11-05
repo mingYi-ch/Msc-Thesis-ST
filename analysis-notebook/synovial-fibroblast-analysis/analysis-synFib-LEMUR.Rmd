@@ -89,6 +89,10 @@ as_tibble(colData(fit)) %>%
 ## Neighborhood in UMAP
 
 ```{r}
+size.legend.title <- 10
+size.legend.text <- 8
+
+
 # predicted DE
 de_plot_data <- as_tibble(colData(fit), rownames = "cell_id") %>%
   mutate(umap = umap[colnames(fit),]) %>%
@@ -107,10 +111,10 @@ dist_de_pl <- de_plot_data %>%
     ggrastr::rasterise(geom_point(aes(color = de), size = 0.5, stroke = 0), dpi = 600) +
     # scale_colour_gradient2_rev(limits = c(-1, 1) * abs_max, oob = scales::squish, breaks = c(-1, 0, 1) * signif_to_zero(abs_max, 1), mid = "lightgrey") +
     scale_color_de_gradient(abs_max, mid_width = 0.2) +
-    facet_grid(vars(inside), labeller = labeller(inside = as_labeller(c("in" = "spots in Neighb.", "out" = "All other spots"))),
+    facet_grid(vars(inside), labeller = labeller(inside = as_labeller(c("in" = "spots in Neighb.", "out" = "all other spots"))),
                switch="y") +
     small_axis("", fontsize = font_size_small) +
-    theme(legend.position = "bottom", legend.margin = margin(t = -2, unit = "mm")) +
+    theme(legend.position = "bottom", legend.margin = margin(t = -2, unit = "mm"), strip.text = element_text(size = size.legend.title), legend.title = element_text(size = size.legend.title), legend.text = element_text(size = size.legend.text)) +
     guides(color = guide_colorbar(barheight = unit(1, "mm"), barwidth = unit(15, "mm"), title.vjust = 1)) +
     labs(color = "predicted DE")
 
@@ -119,7 +123,7 @@ dist_de_pl
 
 ```{r}
 filename <- glue("nei in umap - {gene_of_interest}.pdf")
-ggsave(filename = file.path(res.dir, "plots", filename), plot = dist_de_pl, width = 10, height = 14)
+ggsave(filename = file.path(res.dir, "plots", filename), plot = dist_de_pl, width = 4, height = 6)
 ```
 
 ```{r, paged.print=FALSE}

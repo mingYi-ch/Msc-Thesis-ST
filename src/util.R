@@ -257,7 +257,7 @@ lemur_curve_plot <- function(nei, fit, gene_of_interest, spe, stat_func) {
     guides(x = guide_axis(angle = 0)) +
     
     labs(color = "",
-         x = "avg.dist (μm)",
+         x = "avg.dist (micrometer)",
          y = "Log Expr.",
          subtitle = paste0(gene_of_interest, " expr. vs. Dist to endothelial cell"))  +
     

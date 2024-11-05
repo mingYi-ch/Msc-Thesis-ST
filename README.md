@@ -16,7 +16,7 @@ With respect to the environments for the deconvolution methods, please refer to 
 
 ### Prepare data
 
-The directory for loading data and outputing results can be set in `config/config.R`.
+The directory for loading data and outputing results can be set in `config/config.R`. Please [contact the author](yiming.civi@gmail.com) for the data used in this project.
 
 Run the RMarkdown `analysis-notebook/scRNA-seq-analysis/analysis-scRNA-seq-2.Rmd` to process the reference data set and analyze it.
 

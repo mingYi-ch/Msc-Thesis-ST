@@ -1,4 +1,5 @@
 ---
+= ---
 title: "R Notebook"
 ---
 
@@ -51,7 +52,7 @@ marker.genes <- qread(file.path(res.dir, "markers.qs"))
 
 num_genes <- 200
 markers.SynFib <- marker.genes %>% 
-              filter(cluster == "SynFib") %>%
+              filter(cluster == "Synovial Fibroblast") %>%
               filter(pct.1 > 0.25 & pct.2 >= 0 & avg_log2FC >= 0.5) %>%  # Marlia
               top_n(n = num_genes, wt = avg_log2FC) %>% 
               pull(gene)
@@ -62,6 +63,8 @@ genes_of_interest <- markers.SynFib
 if (!"THY1" %in% genes_of_interest) {
   genes_of_interest <- c(genes_of_interest, "THY1")
 }
+
+# marker.genes$cluster %>% unique()
 ```
 
 ```{r}
@@ -147,20 +150,12 @@ perform_bootstrapping <- function(origin, genes_of_interest, gene_id, assay = "l
     mutate(origin = origin, symbol = gene_id)
   return(res)
 }
-
-
-# perform_bootstrapping("inside", genes_of_interest, gene_id)
-# 
-# comparison_data <- bind_rows(
-#       perform_bootstrapping("inside", genes_of_interest),
-#       perform_bootstrapping("outside", genes_of_interest)
-#     )
 ```
 
 # Plot all curves
 
 ```{r}
-rerun.boot <- F
+rerun.boot <- T
 nei.spots <- T
 assay <- "log"
 
@@ -191,7 +186,6 @@ if (rerun.boot) {
 expression_data <- qread(file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 info <- boot.res[[1]]
-
 ```
 
 ```{r}
@@ -214,11 +208,10 @@ comparison_data <- do.call("c", expression_data_shifted)
 # set y limits
 y_min <- min(comparison_data)
 y_max <- max(comparison_data)
-# y_min <- -1
-# y_max <- 5
 y_expansion <- 0.6
+
 # degree of freedom of natural cubic spline 
-df <- 2
+df <- 3
 set.seed(1)
 
 expr_comparison_pl <- tibble(expr = comparison_data) %>%
@@ -273,23 +266,39 @@ avg.dists.unique <- lapply(as.character(boot.res[[1]]$dist.cluster), calculate.a
 
 x_dist <- avg.dists.unique[2] - avg.dists.unique[1]
 slopes <- (gene_medians_centered[,2] - gene_medians_centered[,1]) / x_dist 
-
-hist_result <- hist(slopes, breaks = 20, plot = F)
-hist_result$breaks
-plot(hist_result)
-
 ```
 
 ```{r}
-# slopes_plot <- tibble(slopes = slopes) %>% 
-#   ggplot(aes(x = slopes)) + 
-#     geom_histogram(bins = 20, fill = "grey", color = "black") +
-#     labs(title = "Histogram of slopes", x = "Value", y = "Frequency")
-# 
-# slopes_plot
-# hist_result$breaks
+# Create the histogram, use base R plot breaks
+hist_result <- hist(slopes, breaks = 30, plot = F)
+breaks <- hist_result$breaks
+
+breaks <- as.list(breaks) %>% unlist()
+breaks[19]
+
+size.axis.text <- 10
+size.axis.title <- 10
+
+slopes_plot <- tibble(slopes = slopes) %>%
+  ggplot(aes(x = slopes)) +
+  geom_histogram(breaks = breaks, 
+                 fill = "grey", color = "black") +
+  labs(x = "slope", y = "frequency") +
+  scale_x_continuous(breaks = c(0)) +  # Set x-ticks on the edges
+  theme_minimal()+
+  theme(
+        axis.title.x = element_text(size = size.axis.title),
+        axis.title.y = element_text(size = size.axis.title),
+        axis.text.x = element_text(size = size.axis.text),  
+        axis.text.y = element_text(size = size.axis.text))
+
+slopes_plot
+
 slope_upper <- 0.2
 slope_lower <- -slope_upper
+
+filename <- glue("histogram_curves.pdf")
+ggsave(filename = file.path(res.dir, "plots", filename), plot = slopes_plot, device = "pdf",  width = 5, height = 3)
 ```
 
 ```{r}
@@ -377,7 +386,7 @@ expr_comparison_pl <- tibble(expr = comparison_data) %>%
   
   
     labs(
-        x = "avg.dist (μm)",
+        x = "avg.dist (micrometer)",
         y = "Log Expr.",
         # subtitle = paste0("All gene vs. Dist to endothelial cell annot. by ", marker.sel, " - bootstrapped "),
         color = NULL
@@ -657,7 +666,7 @@ genes.syn <- names(clusters)
 ```
 
 ```{r}
-rerun.boot <- F
+rerun.boot <- T
 nei.spots <- F
 assay <- "raw"
 
@@ -685,8 +694,34 @@ if (rerun.boot) {
 ```
 
 ```{r}
+rerun.boot <- T
 nei.spots <- F
 assay <- "raw"
+
+# bootstrap for all selected genes and all spots
+if (rerun.boot) {
+  expression_data <- list()
+  boot.res <- list()
+  for(id in genes_of_interest){
+    # perform bootstrapping for both "inside" of genes
+    res_inside <- perform_bootstrapping("inside", genes_of_interest, id, assay)
+    res_outside <- perform_bootstrapping("outside", genes_of_interest, id, assay)
+    
+    if (nei.spots) {
+      expression_data[[id]] <- res_inside$expr
+      boot.res[[id]] <- res_inside
+    }else{
+      expression_data[[id]] <- c(res_inside$expr, res_outside$expr)
+      boot.res[[id]] <- rbind(res_inside, res_outside)
+    }
+  }
+      
+  qsave(boot.res, file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+  qsave(expression_data, file.path(res.dir, glue("expression_data_nei_{num_genes}_{nei.spots}_{assay}.qs")))
+}
+```
+
+```{r}
 boot.res <- qread(file.path(res.dir, glue("boot_res_nei_{num_genes}_{nei.spots}_{assay}.qs")))
 
 # extract median, non log expr
